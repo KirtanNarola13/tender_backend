@@ -7,6 +7,8 @@ router.get('/test', (req, res) => res.json({ msg: 'Inventory Test OK' }));
 
 const {
     createProduct,
+    updateProduct,
+    deleteProduct,
     getProducts,
     createWarehouse,
     getWarehouses,
@@ -24,6 +26,10 @@ router.get('/logs', protect, authorize('admin'), getStockLogs);
 router.route('/products')
     .get(protect, getProducts)
     .post(protect, authorize('admin', 'manager'), createProduct);
+
+router.route('/products/:id')
+    .put(protect, authorize('admin', 'manager'), updateProduct)
+    .delete(protect, authorize('admin'), deleteProduct);
 
 router.route('/warehouses')
     .get(protect, getWarehouses)

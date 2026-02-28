@@ -47,7 +47,7 @@ exports.getAllUsers = async (req, res) => {
         res.status(500).json({ message: error.message });
     }
 };
-// @desc    Get all employees
+// @desc    Get all employees (admin sees all, filtered by query)
 // @route   GET /api/users/employees
 // @access  Private (Admin & Team Leader)
 exports.getEmployees = async (req, res) => {
@@ -59,7 +59,71 @@ exports.getEmployees = async (req, res) => {
     }
 };
 
+// @desc    Team leader creates employee (auto-assigned to themselves)
+// @route   POST /api/users/my-employees
+// @access  Private/Team Leader
+exports.createUserByTeamLeader = async (req, res) => {
+    const { name, email, password } = req.body;
+    try {
+        const userExists = await User.findOne({ email });
+        if (userExists) return res.status(400).json({ message: 'User already exists with this email' });
+
+        const user = await User.create({
+            name,
+            email,
+            password,
+            role: 'employee',
+            assignedManager: req.user._id,
+        });
+
+        res.status(201).json({
+            _id: user._id,
+            name: user.name,
+            email: user.email,
+            role: user.role,
+            assignedManager: user.assignedManager,
+        });
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+};
+
+// @desc    Team leader gets their own employees only
+// @route   GET /api/users/my-employees
+// @access  Private/Team Leader
+exports.getMyEmployees = async (req, res) => {
+    try {
+        const users = await User.find({ role: 'employee', assignedManager: req.user._id })
+            .select('_id name email role createdAt');
+        res.json(users);
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+};
+
+
+// @desc    Team leader updates one of their own employees
+// @route   PUT /api/users/my-employees/:id
+// @access  Private/Team Leader
+exports.updateMyEmployee = async (req, res) => {
+    try {
+        const employee = await User.findOne({ _id: req.params.id, assignedManager: req.user._id });
+        if (!employee) return res.status(404).json({ message: 'Employee not found in your team' });
+
+        const { name, email, password } = req.body;
+        if (name) employee.name = name;
+        if (email) employee.email = email;
+        if (password) employee.password = password;
+
+        const updated = await employee.save();
+        res.json({ _id: updated._id, name: updated.name, email: updated.email, role: updated.role });
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+};
+
 // @desc    Update user
+
 // @route   PUT /api/users/:id
 // @access  Private/Admin
 exports.updateUser = async (req, res) => {

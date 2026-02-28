@@ -13,6 +13,44 @@ exports.createProduct = async (req, res) => {
     }
 };
 
+// @desc    Update a product
+// @route   PUT /api/inventory/products/:id
+// @access  Private/Admin
+exports.updateProduct = async (req, res) => {
+    try {
+        const { name, sku, category, description, images, steps } = req.body;
+        const product = await Product.findById(req.params.id);
+        if (!product) return res.status(404).json({ message: 'Product not found' });
+
+        if (name !== undefined) product.name = name;
+        if (sku !== undefined) product.sku = sku;
+        if (category !== undefined) product.category = category;
+        if (description !== undefined) product.description = description;
+        if (images !== undefined) product.images = images;
+        if (steps !== undefined) product.steps = steps;
+
+        await product.save();
+        res.json(product);
+    } catch (error) {
+        res.status(400).json({ message: error.message });
+    }
+};
+
+
+// @desc    Delete a product
+// @route   DELETE /api/inventory/products/:id
+// @access  Private/Admin
+exports.deleteProduct = async (req, res) => {
+    try {
+        const product = await Product.findById(req.params.id);
+        if (!product) return res.status(404).json({ message: 'Product not found' });
+        await product.deleteOne();
+        res.json({ message: 'Product deleted successfully' });
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+};
+
 // @desc    Get all products
 // @route   GET /api/inventory/products
 // @access  Private
