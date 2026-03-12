@@ -142,7 +142,7 @@ exports.getProjectById = async (req, res) => {
     }
 };
 
-// @desc    Update project (Assign Leader, Change Status)
+// @desc    Update project (full edit — all fields)
 // @route   PUT /api/projects/:id
 // @access  Private/Admin
 exports.updateProject = async (req, res) => {
@@ -150,30 +150,43 @@ exports.updateProject = async (req, res) => {
         const project = await Project.findById(req.params.id);
         if (!project) return res.status(404).json({ message: 'Project not found' });
 
-        const { assignedLeader, status } = req.body;
+        const {
+            name, client, location, category, description,
+            startDate, deadline, status,
+            assignedLeader, products, completionLetter
+        } = req.body;
 
-        if (assignedLeader) {
-            project.assignedLeader = assignedLeader;
-            // TODO: Should we update tasks too?
-            // Yes, if tasks are 'pending' or 'in-progress', maybe reassign?
-            // For now, let's keep it simple: Project Leader is high-level. 
-            // Tasks might be assigned individually.
-            // But wizard assigns ALL tasks to leader.
-            // Let's update uncompleted tasks to new leader
-            await Task.updateMany(
-                { project: project._id, status: { $ne: 'completed' } },
-                { assignedTo: assignedLeader }
-            );
+        // Apply only provided fields (safe partial update)
+        if (name        !== undefined) project.name        = name;
+        if (client      !== undefined) project.client      = client;
+        if (location    !== undefined) project.location    = location;
+        if (category    !== undefined) project.category    = category;
+        if (description !== undefined) project.description = description;
+        if (startDate   !== undefined) project.startDate   = startDate || undefined;
+        if (deadline    !== undefined) project.deadline    = deadline  || undefined;
+        if (status      !== undefined) project.status      = status;
+        if (completionLetter !== undefined) project.completionLetter = completionLetter;
+
+        // Leader change — also reassign pending/in-progress tasks
+        if (assignedLeader !== undefined) {
+            project.assignedLeader = assignedLeader || undefined;
+            if (assignedLeader) {
+                await Task.updateMany(
+                    { project: project._id, status: { $nin: ['completed', 'verified'] } },
+                    { assignedTo: assignedLeader }
+                );
+            }
         }
-        if (status) project.status = status;
 
-        if (req.body.completionLetter) {
-            project.completionLetter = req.body.completionLetter;
+        // Products update (only if sent)
+        if (products !== undefined) {
+            project.products = products;
         }
 
         await project.save();
         res.json(project);
     } catch (error) {
+        console.error('updateProject error:', error.message);
         res.status(400).json({ message: error.message });
     }
 };

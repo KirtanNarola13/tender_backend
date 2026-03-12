@@ -16,7 +16,7 @@ const projectSchema = new mongoose.Schema({
     startDate: Date,
     deadline: Date,
 
-    status: { type: String, enum: ['planning', 'active', 'completed', 'halted'], default: 'planning' },
+    status: { type: String, enum: ['planning', 'active', 'completed', 'halted', 'on-hold'], default: 'planning' },
 
     assignedLeader: { type: mongoose.Schema.Types.ObjectId, ref: 'User' }, // Team Leader for the Site
 
