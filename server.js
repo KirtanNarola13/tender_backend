@@ -15,7 +15,7 @@ const app = express();
 // Middleware
 app.use(express.json());
 app.use(cors({
-    origin: ["http://localhost:5173", "https://tender-admin-sooty.vercel.app"],
+    origin: ["http://localhost:5173", "https://tender-admin-sooty.vercel.app", "https://tender-admin.reliablesolution.in", "https://tender-admin.reliablesolution.in/"],
     withCredentials: true,
 }));
 app.use(helmet({

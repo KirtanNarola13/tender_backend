@@ -16,7 +16,7 @@ exports.getTasks = async (req, res) => {
         if (req.user.role === 'employee') {
             accessFilter = {
                 assignedTo: req.user._id,
-                status: { $in: ['pending', 'in-progress', 'completed'] } // Include completed so they show up
+                status: { $in: ['pending', 'in-progress', 'submitted', 'verified', 'completed'] } // Include all relevant statuses
             };
         } else if (req.user.role === 'team_leader') {
             // Find projects where this user is the leader
@@ -42,7 +42,13 @@ exports.getTasks = async (req, res) => {
         if (req.query.projectId) queryFilter.project = req.query.projectId;
         if (req.query.productId) queryFilter.product = req.query.productId;
         if (req.query.assignedTo) queryFilter.assignedTo = req.query.assignedTo;
-        if (req.query.status) queryFilter.status = req.query.status;
+        if (req.query.status) {
+            if (req.query.status.includes(',')) {
+                queryFilter.status = { $in: req.query.status.split(',') };
+            } else {
+                queryFilter.status = req.query.status;
+            }
+        }
 
         // 3. COMBINE FILTERS
         // If accessFilter is empty (Admin), just use queryFilter.
@@ -114,6 +120,10 @@ exports.uploadPhoto = async (req, res) => {
             return res.status(400).json({ message: 'Task is already verified' });
         }
 
+        if (task.status === 'locked') {
+            return res.status(400).json({ message: 'Task is locked. Complete previous steps first.' });
+        }
+
         // Initialize photos object if missing (using Mongoose Mixed type safety)
         if (!task.photos) {
             task.photos = {};
@@ -133,7 +143,7 @@ exports.uploadPhoto = async (req, res) => {
 
         if (allPhotosUploaded) {
             // console.log('[DEBUG] All photos uploaded. Marking complete.');
-            task.status = 'completed';
+            task.status = 'submitted';
             task.completedBy = req.user._id;
             task.completedAt = Date.now();
 
@@ -174,6 +184,48 @@ exports.uploadPhoto = async (req, res) => {
     }
 };
 
+// @desc    Start Task (Record start time)
+// @route   POST /api/tasks/:id/start
+// @access  Private (Assigned Employee/Leader)
+exports.startTask = async (req, res) => {
+    try {
+        const task = await Task.findById(req.params.id);
+        if (!task) return res.status(404).json({ message: 'Task not found' });
+
+        // Access logic:
+        // 1. If assigned, only assigned person (or leader/admin) can start.
+        // 2. If UNASSIGNED, any authenticated user can "take" and start it.
+        const isAssigned = !!task.assignedTo;
+        const isAssignedToMe = isAssigned && task.assignedTo.toString() === req.user._id.toString();
+        const isAdminOrLeader = req.user.role === 'admin' || req.user.role === 'team_leader';
+
+        if (isAssigned && !isAssignedToMe && !isAdminOrLeader) {
+            return res.status(403).json({ message: 'Task is already assigned to someone else' });
+        }
+
+        // If unassigned, assign it to the person starting it
+        if (!isAssigned) {
+            task.assignedTo = req.user._id;
+            task.assignedBy = req.user._id; // System self-assignment
+        }
+
+        if (task.status !== 'pending' && task.status !== 'in-progress') {
+            return res.status(400).json({ message: `Cannot start task with status: ${task.status}` });
+        }
+
+        task.status = 'in-progress';
+        if (!task.startedAt) {
+            task.startedAt = Date.now();
+        }
+
+        await task.save();
+        res.json(task);
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: error.message });
+    }
+};
+
 // @desc    Explicitly Submit/Complete a Task
 // @route   POST /api/tasks/:id/submit
 // @access  Private
@@ -186,6 +238,10 @@ exports.submitTask = async (req, res) => {
             return res.status(400).json({ message: 'Task is already verified' });
         }
 
+        if (task.status !== 'in-progress') {
+            return res.status(400).json({ message: 'Task must be started before it can be submitted.' });
+        }
+
         // Optional: Double check required photos
         const required = task.requiredPhotos || [];
         const allPhotosUploaded = required.every(type => task.photos && task.photos[type]);
@@ -194,14 +250,11 @@ exports.submitTask = async (req, res) => {
             return res.status(400).json({ message: 'Cannot submit. Missing required photos.' });
         }
 
-        task.status = 'completed';
+        task.status = 'submitted';
         task.completedBy = req.user._id;
         task.completedAt = Date.now();
 
         await task.save();
-
-        // Trigger next step
-        await unlockNextStep(task.project, task.product, task.sequence);
 
         res.json(task);
     } catch (error) {
@@ -236,10 +289,6 @@ exports.updateTask = async (req, res) => {
         // If verified, maybe update project progress?
         if (status === 'verified' || status === 'completed') {
             await updateProjectProductStatus(task.project, task.product, 'in-progress');
-            // Also unlock next step just in case
-            if (status === 'verified') {
-                await unlockNextStep(task.project, task.product, task.sequence);
-            }
         }
 
         res.json(task);
@@ -250,26 +299,40 @@ exports.updateTask = async (req, res) => {
 
 // Helper: Unlock Next Step
 const unlockNextStep = async (projectId, productId, currentSequence) => {
-    const nextTask = await Task.findOne({
-        project: projectId,
-        product: productId,
-        sequence: currentSequence + 1
-    });
+    console.log(`🔓 [UNLOCKING] Checking next step for Project: ${projectId}, Product: ${productId}, After Seq: ${currentSequence}`);
+    
+    try {
+        // Unlock ALL matching next steps (in case of duplicates)
+        const result = await Task.updateMany(
+            {
+                project: projectId,
+                product: productId,
+                sequence: currentSequence + 1,
+                status: 'locked'
+            },
+            {
+                $set: { status: 'pending' }
+            }
+        );
 
-    if (nextTask) {
-        // Next task exists, it should already be pending/accessible.
-        // We can explicitly set it to pending just to be safe, or do nothing.
-        // Given we removed 'locked', we just ensure it's not somehow stuck.
-        if (nextTask.status === 'completed' || nextTask.status === 'verified') {
-            // Do nothing if already done
+        if (result.matchedCount > 0) {
+            console.log(`✅ [UNLOCKING] Successfully unlocked ${result.modifiedCount} tasks for Sequence ${currentSequence + 1}`);
         } else {
-            nextTask.status = 'pending';
-            await nextTask.save();
+            // Check if there even IS a next step
+            const hasNext = await Task.exists({
+                project: projectId,
+                product: productId,
+                sequence: currentSequence + 1
+            });
+            if (!hasNext) {
+                console.log(`ℹ️ [UNLOCKING] No more steps found for this product. Reaching end of workflow.`);
+                await updateProjectProductStatus(projectId, productId);
+            } else {
+                console.log(`⚠️ [UNLOCKING] Next step exists but was not in 'locked' status.`);
+            }
         }
-    } else {
-        // No more steps? Mark Product in Project as Completed?
-        // We can update Project.products status here.
-        await updateProjectProductStatus(projectId, productId);
+    } catch (error) {
+        console.error(`❌ [UNLOCKING] Error during next step unlock:`, error);
     }
 };
 

@@ -46,6 +46,15 @@ exports.login = async (req, res) => {
         const user = await User.findOne({ email }).select('+password');
 
         if (user && (await user.matchPassword(password))) {
+            // Check if admin is trying to login from mobile
+            const clientType = req.headers['x-client-type'];
+            if (user.role === 'admin' && clientType === 'mobile') {
+                console.log('Admin login blocked from mobile:', email);
+                return res.status(403).json({ 
+                    message: 'Use admin login for login admin user' 
+                });
+            }
+
             console.log('Login success for:', email);
             res.json({
                 _id: user._id,

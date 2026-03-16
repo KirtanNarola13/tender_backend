@@ -92,12 +92,9 @@ exports.createProject = async (req, res) => {
                             sequence: step.sequence,
                             description: step.description,
                             requiredPhotos: step.requiredPhotos,
-                            // First step is pending (if project active?), others locked
-                            // Actually, let's make Step 1 'pending' and others 'locked'.
-                            // If Project is 'planning', maybe all 'locked'? 
-                            // Let's set Step 1 to 'pending' so it's ready.
-                            status: 'pending', // ALWAYS PENDING so they are visible/assignable
-                            assignedTo: assignedLeader, // Default to Team Leader
+                            // All steps are now pending by default (no sequential locking)
+                            status: 'pending',
+                            assignedTo: assignedLeader, 
                             assignedBy: req.user._id
                         });
                     }
@@ -199,6 +196,9 @@ exports.deleteProject = async (req, res) => {
         const project = await Project.findById(req.params.id);
         if (!project) return res.status(404).json({ message: 'Project not found' });
 
+        // Cascade delete associated tasks
+        await Task.deleteMany({ project: project._id });
+        
         await project.deleteOne();
         res.json({ message: 'Project removed' });
     } catch (error) {

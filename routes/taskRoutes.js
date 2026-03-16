@@ -1,10 +1,14 @@
 const express = require('express');
 const router = express.Router();
-const { getTasks, assignTask, uploadPhoto, submitTask } = require('../controllers/taskController');
+const { getTasks, assignTask, uploadPhoto, submitTask, startTask } = require('../controllers/taskController');
 const { protect, authorize } = require('../middleware/authMiddleware');
 
 router.route('/')
     .get(protect, getTasks);
+
+// Start a task
+router.route('/:id/start')
+    .post(protect, startTask);
 
 // Assign a task (Step) to an employee
 router.route('/:id/assign')
