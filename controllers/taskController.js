@@ -139,39 +139,17 @@ exports.uploadPhoto = async (req, res) => {
         const required = task.requiredPhotos || [];
         // console.log(`[DEBUG] Required Photos: ${required}, Current Photos:`, task.photos);
 
-        const allPhotosUploaded = required.every(type => task.photos && task.photos[type]);
+        // Simply mark as in-progress once a photo is uploaded
+        task.status = 'in-progress';
 
-        if (allPhotosUploaded) {
-            // console.log('[DEBUG] All photos uploaded. Marking complete.');
-            task.status = 'submitted';
-            task.completedBy = req.user._id;
-            task.completedAt = Date.now();
-
-            // TRIGGER NEXT STEP
-            try {
-                // Force progress update (recalc %) - even if product isn't fully done
-                await updateProjectProductStatus(task.project, task.product, 'in-progress');
-
-                await unlockNextStep(task.project, task.product, task.sequence);
-            } catch (err) {
-                console.error('[ERROR] next step/progress update failed:', err);
-                // Don't fail the request
-            }
-        } else {
-            // console.log('[DEBUG] Not all photos uploaded. Setting in-progress.');
-            task.status = 'in-progress';
-
-            // Also mark Project Product as in-progress if not already
-            try {
-                await updateProjectProductStatus(task.project, task.product, 'in-progress');
-            } catch (err) {
-                console.error('[ERROR] updateProjectProductStatus failed:', err);
-                // Don't fail request
-            }
+        // Update Project Product as in-progress if not already
+        try {
+            await updateProjectProductStatus(task.project, task.product, 'in-progress');
+        } catch (err) {
+            console.error('[ERROR] updateProjectProductStatus failed:', err);
         }
 
         await task.save();
-        // console.log('[DEBUG] Task saved successfully.');
         res.json(task);
 
     } catch (error) {
@@ -234,12 +212,8 @@ exports.submitTask = async (req, res) => {
         const task = await Task.findById(req.params.id);
         if (!task) return res.status(404).json({ message: 'Task not found' });
 
-        if (task.status === 'verified') {
-            return res.status(400).json({ message: 'Task is already verified' });
-        }
-
-        if (task.status !== 'in-progress') {
-            return res.status(400).json({ message: 'Task must be started before it can be submitted.' });
+        if (task.status !== 'in-progress' && task.status !== 'pending') {
+            return res.status(400).json({ message: 'Task must be in progress or pending to be submitted.' });
         }
 
         // Optional: Double check required photos
@@ -250,9 +224,12 @@ exports.submitTask = async (req, res) => {
             return res.status(400).json({ message: 'Cannot submit. Missing required photos.' });
         }
 
+        const { submissionText } = req.body;
+
         task.status = 'submitted';
         task.completedBy = req.user._id;
         task.completedAt = Date.now();
+        if (submissionText) task.submissionText = submissionText;
 
         await task.save();
 
@@ -274,21 +251,26 @@ exports.updateTask = async (req, res) => {
         const { status, rejectionReason } = req.body;
 
         if (status) {
-            task.status = status;
+            // Map 'verified' status from frontend to 'completed' in DB
+            task.status = status === 'verified' ? 'completed' : status;
         }
 
         if (status === 'in-progress' && rejectionReason) {
-            // If rejected, maybe we want to store the reason?
-            // Schema doesn't have rejectionReason, but we can add it or just log it.
-            // For now, let's just change status back to 'in-progress' so they can re-upload.
-            // Ideally add rejectionReason to Task model.
+            task.rejectionReason = rejectionReason;
+        }
+
+        if (status === 'verified') {
+            task.verifiedAt = Date.now();
+            task.verifiedBy = req.user._id;
+            task.rejectionReason = ""; // Clear reason on approval
         }
 
         await task.save();
 
-        // If verified, maybe update project progress?
-        if (status === 'verified' || status === 'completed') {
+        // If approved (verified), update project progress and unlock next step
+        if (status === 'verified' || task.status === 'completed') {
             await updateProjectProductStatus(task.project, task.product, 'in-progress');
+            await unlockNextStep(task.project, task.product, task.sequence);
         }
 
         res.json(task);
@@ -358,14 +340,8 @@ const updateProjectProductStatus = async (projectId, productId, explicitStatus =
     const prodEntry = project.products.find(p => p.product && p.product.toString() === productId.toString());
 
     if (prodEntry) {
-        // Only update status if it's not already completed
-        if (prodEntry.status !== 'completed') {
-            prodEntry.status = explicitStatus;
-        }
-
-        if (explicitStatus === 'completed') {
-            prodEntry.completedQuantity = prodEntry.plannedQuantity;
-        }
+        // Only update status to 'completed' if all steps are verified
+        // We'll calculate this below
 
         // --- NEW LOGIC 1: Calculate Real-Time Progress (%) ---
         // Count total tasks for this project & product
@@ -378,8 +354,24 @@ const updateProjectProductStatus = async (projectId, productId, explicitStatus =
 
         if (totalTasks > 0) {
             prodEntry.progress = Math.round((completedTasks / totalTasks) * 100);
+            
+            // Automatically mark product as completed if all tasks are verified
+            if (completedTasks === totalTasks && totalTasks > 0) {
+                prodEntry.status = 'completed';
+                prodEntry.completedQuantity = prodEntry.plannedQuantity;
+            } else if (completedTasks > 0 || totalTasks > 0) {
+                // If work has started, ensure status is in-progress
+                if (prodEntry.status === 'pending') {
+                    prodEntry.status = 'in-progress';
+                }
+            }
         } else {
-            prodEntry.progress = explicitStatus === 'completed' ? 100 : 0;
+            // No tasks? Use explicitStatus if provided
+            if (explicitStatus === 'completed') {
+                prodEntry.status = 'completed';
+                prodEntry.progress = 100;
+                prodEntry.completedQuantity = prodEntry.plannedQuantity;
+            }
         }
         // console.log(`[DEBUG] Calculated Progress: ${completedTasks}/${totalTasks} = ${prodEntry.progress}%`);
 

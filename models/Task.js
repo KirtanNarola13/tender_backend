@@ -50,6 +50,7 @@ const taskSchema = new mongoose.Schema({
     completedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     verifiedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     rejectionReason: String,
+    submissionText: String,
 
 }, { timestamps: true });
 

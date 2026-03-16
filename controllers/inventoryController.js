@@ -6,7 +6,33 @@ const StockLog = require('../models/StockLog');
 // @access  Private/Admin
 exports.createProduct = async (req, res) => {
     try {
-        const product = await Product.create(req.body);
+        const { initialStock, ...productData } = req.body;
+        
+        let product = new Product(productData);
+
+        if (initialStock && initialStock.warehouseId && initialStock.quantity > 0) {
+            product.stock = [{
+                warehouse: initialStock.warehouseId,
+                quantity: Number(initialStock.quantity)
+            }];
+            product.totalStock = Number(initialStock.quantity);
+        }
+
+        await product.save();
+
+        if (initialStock && initialStock.warehouseId && initialStock.quantity > 0) {
+            await StockLog.create({
+                product: product._id,
+                warehouse: initialStock.warehouseId,
+                action: 'IN',
+                quantity: Number(initialStock.quantity),
+                previousStock: 0,
+                newStock: Number(initialStock.quantity),
+                reason: 'Initial Stock Addition',
+                performedBy: req.user._id
+            });
+        }
+
         res.status(201).json(product);
     } catch (error) {
         res.status(400).json({ message: error.message });
@@ -18,7 +44,7 @@ exports.createProduct = async (req, res) => {
 // @access  Private/Admin
 exports.updateProduct = async (req, res) => {
     try {
-        const { name, sku, category, description, images, steps } = req.body;
+        const { name, sku, category, description, images, steps, additionalStock } = req.body;
         const product = await Product.findById(req.params.id);
         if (!product) return res.status(404).json({ message: 'Product not found' });
 
@@ -28,6 +54,34 @@ exports.updateProduct = async (req, res) => {
         if (description !== undefined) product.description = description;
         if (images !== undefined) product.images = images;
         if (steps !== undefined) product.steps = steps;
+
+        // Handle Additional Stock
+        if (additionalStock && additionalStock.warehouseId && additionalStock.quantity > 0) {
+            const stockIndex = product.stock.findIndex(s => s.warehouse.toString() === additionalStock.warehouseId);
+            let previousStock = 0;
+
+            if (stockIndex > -1) {
+                previousStock = product.stock[stockIndex].quantity;
+                product.stock[stockIndex].quantity += Number(additionalStock.quantity);
+            } else {
+                product.stock.push({ warehouse: additionalStock.warehouseId, quantity: Number(additionalStock.quantity) });
+            }
+
+            // Recalculate total stock
+            product.totalStock = product.stock.reduce((acc, curr) => acc + curr.quantity, 0);
+
+            // Create Stock Log
+            await StockLog.create({
+                product: product._id,
+                warehouse: additionalStock.warehouseId,
+                action: 'IN',
+                quantity: Number(additionalStock.quantity),
+                previousStock,
+                newStock: previousStock + Number(additionalStock.quantity),
+                reason: 'Stock Addition during Edit',
+                performedBy: req.user._id
+            });
+        }
 
         await product.save();
         res.json(product);
