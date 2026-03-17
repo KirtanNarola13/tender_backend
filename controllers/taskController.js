@@ -144,6 +144,12 @@ exports.uploadPhoto = async (req, res) => {
 
         // Update Project Product as in-progress if not already
         try {
+            const project = await Project.findById(task.project);
+            if (project && project.startDate && new Date(project.startDate) > new Date()) {
+                return res.status(403).json({ 
+                    message: `Project has not started yet. (Start Date: ${new Date(project.startDate).toLocaleDateString()})` 
+                });
+            }
             await updateProjectProductStatus(task.project, task.product, 'in-progress');
         } catch (err) {
             console.error('[ERROR] updateProjectProductStatus failed:', err);
@@ -189,6 +195,14 @@ exports.startTask = async (req, res) => {
 
         if (task.status !== 'pending' && task.status !== 'in-progress') {
             return res.status(400).json({ message: `Cannot start task with status: ${task.status}` });
+        }
+
+        // Check Project Start Date
+        const project = await Project.findById(task.project);
+        if (project && project.startDate && new Date(project.startDate) > new Date()) {
+            return res.status(403).json({ 
+                message: `Project has not started yet. (Start Date: ${new Date(project.startDate).toLocaleDateString()})` 
+            });
         }
 
         task.status = 'in-progress';
