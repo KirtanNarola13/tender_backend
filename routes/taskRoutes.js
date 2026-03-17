@@ -11,6 +11,9 @@ router.route('/:id/start')
     .post(protect, startTask);
 
 // Assign a task (Step) to an employee
+router.route('/assign-bulk')
+    .post(protect, authorize('team_leader', 'admin'), require('../controllers/taskController').assignBulk);
+
 router.route('/:id/assign')
     .put(protect, authorize('team_leader', 'admin'), assignTask);
 

@@ -68,9 +68,10 @@ exports.getTasks = async (req, res) => {
         }
 
         const tasks = await Task.find(finalFilter)
-            .populate('project', 'name location')
+            .populate('project', 'name location startDate deadline')
             .populate('product', 'name images')
-            .populate('assignedTo', 'name role')
+            .populate('assignedTo', 'name role email')
+            .populate('completedBy', 'name role email')
             .sort({ project: 1, sequence: 1 });
 
         res.json(tasks);
@@ -95,6 +96,44 @@ exports.assignTask = async (req, res) => {
 
         await task.save();
         res.json(task);
+    } catch (error) {
+        res.status(400).json({ message: error.message });
+    }
+};
+
+// @desc    Bulk Assign Tasks to Employee (Project, Product, or List)
+// @route   POST /api/tasks/assign-bulk
+// @access  Private (Leader/Admin)
+exports.assignBulk = async (req, res) => {
+    try {
+        const { employeeId, projectId, productId, taskIds } = req.body;
+        
+        let filter = {};
+        if (taskIds && taskIds.length > 0) {
+            filter = { _id: { $in: taskIds } };
+        } else if (projectId && productId) {
+            filter = { project: projectId, product: productId };
+        } else if (projectId) {
+            filter = { project: projectId };
+        } else {
+            return res.status(400).json({ message: 'Missing assignment target (project, product, or tasks)' });
+        }
+
+        const result = await Task.updateMany(
+            filter,
+            {
+                $set: {
+                    assignedTo: employeeId,
+                    assignedBy: req.user._id,
+                    status: 'pending'
+                }
+            }
+        );
+
+        res.json({
+            message: `Successfully assigned ${result.modifiedCount} tasks`,
+            modifiedCount: result.modifiedCount
+        });
     } catch (error) {
         res.status(400).json({ message: error.message });
     }
@@ -261,6 +300,14 @@ exports.updateTask = async (req, res) => {
     try {
         const task = await Task.findById(req.params.id);
         if (!task) return res.status(404).json({ message: 'Task not found' });
+
+        // Access Control for Team Leaders
+        if (req.user.role === 'team_leader') {
+            const project = await Project.findById(task.project);
+            if (!project || project.assignedLeader.toString() !== req.user._id.toString()) {
+                return res.status(403).json({ message: 'Not authorized to verify tasks for this project' });
+            }
+        }
 
         const { status, rejectionReason } = req.body;
 

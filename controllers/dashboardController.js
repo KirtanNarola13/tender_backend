@@ -24,6 +24,24 @@ exports.getDashboardStats = async (req, res) => {
         // Inventory Stats (Top 10 products by stock for graph)
         const inventoryStats = await Product.find().select('name totalStock').limit(10).sort({ totalStock: -1 });
 
+        // Project Progress Stats
+        const projects = await Project.find().select('name');
+        const projectStats = await Promise.all(projects.map(async (project) => {
+            const projectTasks = await Task.find({ project: project._id }).select('status');
+            const total = projectTasks.length;
+            const completed = projectTasks.filter(t => t.status === 'completed' || t.status === 'verified').length;
+            const progress = total > 0 ? Math.round((completed / total) * 100) : 0;
+            return {
+                name: project.name,
+                progress: progress,
+                totalTasks: total,
+                completedTasks: completed
+            };
+        }));
+
+        // Sort by Progress (Descending)
+        projectStats.sort((a, b) => b.progress - a.progress);
+
         res.json({
             totalProjects,
             totalTasks,
@@ -31,7 +49,8 @@ exports.getDashboardStats = async (req, res) => {
             completedTasks,
             totalEmployees,
             totalTeamLeaders,
-            inventoryStats
+            inventoryStats,
+            projectStats
         });
     } catch (error) {
         res.status(500).json({ message: error.message });
@@ -46,7 +65,14 @@ exports.getEmployeePerformance = async (req, res) => {
         // Aggregate tasks by assignedTo
         // We want: Employee Name, Total Assigned, Completed, Pending, Completion Rate
 
-        const employees = await User.find({ role: 'employee' }).select('name email');
+        let query = { role: 'employee' };
+        
+        // If team leader, only show their own employees
+        if (req.user.role === 'team_leader') {
+            query.assignedManager = req.user._id;
+        }
+
+        const employees = await User.find(query).select('name email');
 
         const performanceData = await Promise.all(employees.map(async (emp) => {
             const totalAssigned = await Task.countDocuments({ assignedTo: emp._id });
