@@ -1,4 +1,5 @@
 const Task = require('../models/Task');
+const mongoose = require('mongoose');
 const { Project } = require('../models/Project'); // Mongoose model
 // Note: Project exports Project, School. But we consolidated.
 
@@ -11,12 +12,12 @@ const { Project } = require('../models/Project'); // Mongoose model
 exports.getTasks = async (req, res) => {
     try {
         let accessFilter = {};
+        console.log(`[DEBUG] getTasks called for user: ${req.user._id}, role: ${req.user.role}`);
 
         // 1. DETERMINE ACCESS RIGHTS
         if (req.user.role === 'employee') {
             accessFilter = {
-                assignedTo: req.user._id,
-                status: { $in: ['pending', 'in-progress', 'submitted', 'verified', 'completed'] } // Include all relevant statuses
+                assignedTo: req.user._id
             };
         } else if (req.user.role === 'team_leader') {
             // Find projects where this user is the leader
@@ -67,6 +68,7 @@ exports.getTasks = async (req, res) => {
             finalFilter = queryFilter;
         }
 
+        console.log(`[DEBUG] finalFilter:`, JSON.stringify(finalFilter));
         const tasks = await Task.find(finalFilter)
             .populate('project', 'name location startDate deadline')
             .populate('product', 'name images')
@@ -74,6 +76,7 @@ exports.getTasks = async (req, res) => {
             .populate('completedBy', 'name role email')
             .sort({ project: 1, sequence: 1 });
 
+        console.log(`[DEBUG] Found ${tasks.length} tasks for filter`);
         res.json(tasks);
     } catch (error) {
         res.status(500).json({ message: error.message });
