@@ -28,7 +28,8 @@ const projectSchema = new mongoose.Schema({
         completedQuantity: { type: Number, default: 0 },
         status: { type: String, enum: ['pending', 'in-progress', 'completed'], default: 'pending' },
         // Tracks granular step progress (0-100%)
-        progress: { type: Number, default: 0 }
+        progress: { type: Number, default: 0 },
+        lastActivity: { type: Date, default: Date.now }
     }],
 
     completionLetter: {

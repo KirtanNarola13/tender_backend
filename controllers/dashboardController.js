@@ -82,7 +82,7 @@ exports.getEmployeePerformance = async (req, res) => {
             });
             const pending = await Task.countDocuments({
                 assignedTo: emp._id,
-                status: { $in: ['pending', 'in-progress'] }
+                status: { $nin: ['completed', 'verified'] }
             });
 
             const completionRate = totalAssigned > 0

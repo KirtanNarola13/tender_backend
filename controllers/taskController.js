@@ -74,7 +74,7 @@ exports.getTasks = async (req, res) => {
             .populate('product', 'name images')
             .populate('assignedTo', 'name role email')
             .populate('completedBy', 'name role email')
-            .sort({ project: 1, sequence: 1 });
+            .sort({ updatedAt: -1 });
 
         console.log(`[DEBUG] Found ${tasks.length} tasks for filter`);
         res.json(tasks);
@@ -253,6 +253,7 @@ exports.startTask = async (req, res) => {
         }
 
         await task.save();
+        await updateProjectProductStatus(task.project, task.product, 'in-progress');
         res.json(task);
     } catch (error) {
         console.error(error);
@@ -288,7 +289,7 @@ exports.submitTask = async (req, res) => {
         if (submissionText) task.submissionText = submissionText;
 
         await task.save();
-
+        await updateProjectProductStatus(task.project, task.product, 'in-progress');
         res.json(task);
     } catch (error) {
         console.error(error);
@@ -409,22 +410,25 @@ const updateProjectProductStatus = async (projectId, productId, explicitStatus =
 
         // --- NEW LOGIC 1: Calculate Real-Time Progress (%) ---
         // Count total tasks for this project & product
-        const totalTasks = await Task.countDocuments({ project: projectId, product: productId });
+        const totalTasks = await Task.countDocuments({ 
+            project: new mongoose.Types.ObjectId(projectId), 
+            product: new mongoose.Types.ObjectId(productId) 
+        });
         const completedTasks = await Task.countDocuments({
-            project: projectId,
-            product: productId,
-            status: 'completed'
+            project: new mongoose.Types.ObjectId(projectId),
+            product: new mongoose.Types.ObjectId(productId),
+            status: { $in: ['completed', 'verified'] }
         });
 
         if (totalTasks > 0) {
             prodEntry.progress = Math.round((completedTasks / totalTasks) * 100);
             
-            // Automatically mark product as completed if all tasks are verified
+            // Automatically mark product as completed if all tasks are verified/completed
             if (completedTasks === totalTasks && totalTasks > 0) {
                 prodEntry.status = 'completed';
                 prodEntry.completedQuantity = prodEntry.plannedQuantity;
-            } else if (completedTasks > 0 || totalTasks > 0) {
-                // If work has started, ensure status is in-progress
+            } else if (completedTasks > 0) {
+                // If work has started and at least one task is done, ensure status is in-progress
                 if (prodEntry.status === 'pending') {
                     prodEntry.status = 'in-progress';
                 }
@@ -437,6 +441,7 @@ const updateProjectProductStatus = async (projectId, productId, explicitStatus =
                 prodEntry.completedQuantity = prodEntry.plannedQuantity;
             }
         }
+        prodEntry.lastActivity = Date.now();
         // console.log(`[DEBUG] Calculated Progress: ${completedTasks}/${totalTasks} = ${prodEntry.progress}%`);
 
         // --- NEW LOGIC 2: Update overall PROJECT STATUS ---

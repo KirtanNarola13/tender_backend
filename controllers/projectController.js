@@ -50,8 +50,44 @@ exports.createProject = async (req, res) => {
 // @access  Private
 exports.getProjects = async (req, res) => {
     try {
-        const projects = await Project.find({}).populate('createdBy', 'name').populate('assignedLeader', 'name');
-        res.json(projects);
+        const projects = await Project.find({})
+            .populate('createdBy', 'name')
+            .populate('assignedLeader', 'name')
+            .sort({ updatedAt: -1 });
+
+        // Enrich projects with real-time progress for each product
+        const enrichedProjects = await Promise.all(projects.map(async (project) => {
+            const projectObj = project.toObject();
+            if (projectObj.products && projectObj.products.length > 0) {
+                // Calculate real-time progress for each product in the project
+                projectObj.products = await Promise.all(projectObj.products.map(async (prodEntry) => {
+                    const totalTasks = await Task.countDocuments({ 
+                        project: project._id, 
+                        product: prodEntry.product 
+                    });
+                    const completedTasks = await Task.countDocuments({
+                        project: project._id,
+                        product: prodEntry.product,
+                        status: { $in: ['completed', 'verified'] }
+                    });
+
+                    if (totalTasks > 0) {
+                        prodEntry.progress = Math.round((completedTasks / totalTasks) * 100);
+                    }
+                    return prodEntry;
+                }));
+
+                // Sort products internally by lastActivity
+                projectObj.products.sort((a, b) => {
+                    const dateA = a.lastActivity || project.createdAt || new Date(0);
+                    const dateB = b.lastActivity || project.createdAt || new Date(0);
+                    return dateB - dateA;
+                });
+            }
+            return projectObj;
+        }));
+
+        res.json(enrichedProjects);
     } catch (error) {
         res.status(500).json({ message: error.message });
     }
@@ -66,6 +102,14 @@ exports.getProjectById = async (req, res) => {
             .populate('products.product', 'name images steps')
             .populate('assignedLeader', 'name');
         if (project) {
+            // Sort products by last activity (Latest first)
+            if (project.products && project.products.length > 0) {
+                project.products.sort((a, b) => {
+                    const dateA = a.lastActivity || a._id.getTimestamp() || new Date(0);
+                    const dateB = b.lastActivity || b._id.getTimestamp() || new Date(0);
+                    return dateB - dateA;
+                });
+            }
             res.json(project);
         } else {
             res.status(404).json({ message: 'Project not found' });
