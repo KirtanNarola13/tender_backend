@@ -26,6 +26,9 @@ const userSchema = new mongoose.Schema({
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User', // If employee, who is their manager?
     },
+    fcmToken: {
+        type: String,
+    },
     createdAt: {
         type: Date,
         default: Date.now,

@@ -7,6 +7,7 @@ const { Project } = require('../models/Project');
 const { Product } = require('../models/Inventory');
 const Task = require('../models/Task');
 const StockLog = require('../models/StockLog');
+const { createNotification } = require('./notificationController');
 
 // @desc    Create a new project (Site) & Auto-generate Tasks
 // @route   POST /api/projects
@@ -36,6 +37,21 @@ exports.createProject = async (req, res) => {
                 await deductStock(item.product, item.plannedQuantity, project.name, project._id, req.user._id);
                 await generateTasks(project._id, item.product, assignedLeader, req.user._id);
             }
+        }
+        
+        // 3. Send Notification to Assigned Leader
+        console.log(`[DEBUG] Attempting to notify leader: ${assignedLeader} for project: ${project.name}`);
+        if (assignedLeader) {
+            const notif = await createNotification({
+                recipient: assignedLeader,
+                title: 'New Project Assigned',
+                message: `You have been assigned as the Team Leader for project: ${project.name}`,
+                type: 'project_assigned',
+                relatedProject: project._id
+            });
+            console.log(`[DEBUG] Notification result: ${notif ? 'Success' : 'Failed'}`);
+        } else {
+            console.log(`[DEBUG] No assignedLeader found in request body`);
         }
 
         res.status(201).json(project);
@@ -146,8 +162,18 @@ exports.updateProject = async (req, res) => {
 
         // Leader change — also reassign pending/in-progress tasks
         if (assignedLeader !== undefined) {
+            const oldLeader = project.assignedLeader ? project.assignedLeader.toString() : null;
             project.assignedLeader = assignedLeader || undefined;
             if (assignedLeader) {
+                if (String(assignedLeader) !== oldLeader) {
+                    await createNotification({
+                        recipient: assignedLeader,
+                        title: 'New Project Assigned',
+                        message: `You have been assigned as the Team Leader for project: ${project.name}`,
+                        type: 'project_assigned',
+                        relatedProject: project._id
+                    });
+                }
                 await Task.updateMany(
                     { project: project._id, status: { $nin: ['completed', 'verified'] } },
                     { assignedTo: assignedLeader }

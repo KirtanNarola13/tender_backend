@@ -45,6 +45,7 @@ app.use('/api/inventory', inventoryRoutes);
 app.use('/api/tasks', require('./routes/taskRoutes'));
 app.use('/api/upload', require('./routes/uploadRoutes'));
 app.use('/api/dashboard', require('./routes/dashboardRoutes'));
+app.use('/api/notifications', require('./routes/notificationRoutes'));
 
 const path = require('path');
 app.use('/uploads', express.static(path.join(__dirname, '/uploads')));

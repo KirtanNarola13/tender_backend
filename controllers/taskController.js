@@ -1,7 +1,7 @@
 const Task = require('../models/Task');
 const mongoose = require('mongoose');
 const { Project } = require('../models/Project'); // Mongoose model
-// Note: Project exports Project, School. But we consolidated.
+const { createNotification } = require('./notificationController');
 
 // @desc    Get Tasks for User (Leader or Employee)
 // @route   GET /api/tasks
@@ -98,6 +98,16 @@ exports.assignTask = async (req, res) => {
         task.status = 'pending';
 
         await task.save();
+
+        await createNotification({
+            recipient: employeeId,
+            title: 'New Task Assigned',
+            message: `You have been assigned the task: ${task.stepName}`,
+            type: 'task_assigned',
+            relatedProject: task.project,
+            relatedTask: task._id
+        });
+
         res.json(task);
     } catch (error) {
         res.status(400).json({ message: error.message });
@@ -132,6 +142,16 @@ exports.assignBulk = async (req, res) => {
                 }
             }
         );
+
+        if (result.modifiedCount > 0) {
+            await createNotification({
+                recipient: employeeId,
+                title: 'New Tasks Assigned',
+                message: `You have been bulk assigned ${result.modifiedCount} tasks.`,
+                type: 'task_assigned',
+                relatedProject: projectId || null
+            });
+        }
 
         res.json({
             message: `Successfully assigned ${result.modifiedCount} tasks`,
@@ -290,6 +310,18 @@ exports.submitTask = async (req, res) => {
 
         await task.save();
         await updateProjectProductStatus(task.project, task.product, 'in-progress');
+
+        if (task.assignedBy) {
+            await createNotification({
+                recipient: task.assignedBy,
+                title: 'Task Submitted for Review',
+                message: `Task "${task.stepName}" has been submitted for review by ${req.user.name}.`,
+                type: 'task_submitted',
+                relatedProject: task.project,
+                relatedTask: task._id
+            });
+        }
+
         res.json(task);
     } catch (error) {
         console.error(error);
@@ -322,12 +354,32 @@ exports.updateTask = async (req, res) => {
 
         if (status === 'in-progress' && rejectionReason) {
             task.rejectionReason = rejectionReason;
+            if (task.assignedTo) {
+                await createNotification({
+                    recipient: task.assignedTo,
+                    title: 'Task Rejected',
+                    message: `Your task "${task.stepName}" was rejected. Reason: ${rejectionReason}`,
+                    type: 'task_rejected',
+                    relatedProject: task.project,
+                    relatedTask: task._id
+                });
+            }
         }
 
         if (status === 'verified') {
             task.verifiedAt = Date.now();
             task.verifiedBy = req.user._id;
             task.rejectionReason = ""; // Clear reason on approval
+            if (task.assignedTo) {
+                await createNotification({
+                    recipient: task.assignedTo,
+                    title: 'Task Approved',
+                    message: `Your task "${task.stepName}" has been approved.`,
+                    type: 'task_approved',
+                    relatedProject: task.project,
+                    relatedTask: task._id
+                });
+            }
         }
 
         await task.save();
