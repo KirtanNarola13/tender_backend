@@ -19,7 +19,7 @@ const userSchema = new mongoose.Schema({
     },
     role: {
         type: String,
-        enum: ['admin', 'team_leader', 'verify_team', 'viewer', 'employee'], // Keeping employee for backward compat if needed
+        enum: ['admin', 'team_leader', 'verify_team', 'viewer', 'employee', 'admin_viewer'], 
         default: 'team_leader',
     },
     assignedManager: {

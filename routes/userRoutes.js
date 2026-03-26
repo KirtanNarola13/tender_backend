@@ -16,14 +16,14 @@ const { protect, authorize } = require('../middleware/authMiddleware');
 // Admin: create & get all users
 router.route('/')
     .post(protect, authorize('admin'), createUser)
-    .get(protect, authorize('admin'), getAllUsers);
+    .get(protect, authorize('admin', 'admin_viewer'), getAllUsers);
 
 // Must be BEFORE /:id route to prevent Express treating 'employees' / 'my-employees' as an ID
-router.get('/employees', protect, authorize('admin', 'team_leader'), getEmployees);
+router.get('/employees', protect, authorize('admin', 'team_leader', 'admin_viewer'), getEmployees);
 
 // Team leader: manage their own employees
 router.route('/my-employees')
-    .get(protect, authorize('team_leader', 'admin'), getMyEmployees)
+    .get(protect, authorize('team_leader', 'admin', 'admin_viewer'), getMyEmployees)
     .post(protect, authorize('team_leader'), createUserByTeamLeader);
 
 router.route('/my-employees/:id')

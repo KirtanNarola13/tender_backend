@@ -25,6 +25,15 @@ const sendPushNotification = async (token, title, body, data = {}) => {
             ...data,
             click_action: 'FLUTTER_NOTIFICATION_CLICK',
         },
+        apns: {
+            payload: {
+                aps: {
+                    sound: 'default',
+                    badge: 1,
+                    contentAvailable: true,
+                },
+            },
+        },
         token,
     };
 
