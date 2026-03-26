@@ -2,17 +2,18 @@ const admin = require('firebase-admin');
 const path = require('path');
 const fs = require('fs');
 
-const serviceAccountPath = path.join(__dirname, '../config/firebase-service-account.json');
-
+const serviceAccountPath = path.join(__dirname, 'firebase-service-account.json');
 if (fs.existsSync(serviceAccountPath)) {
-    admin.initializeApp({
-        credential: admin.credential.cert(require(serviceAccountPath)),
-    });
-    console.log('[Firebase] Admin SDK Initialized');
-} else {
-    console.warn('[Firebase] Service account file not found. Push notifications will be disabled.');
-}
+    const serviceAccount = JSON.parse(fs.readFileSync(serviceAccountPath, 'utf8'));
 
+    if (!admin.apps.length) {
+        admin.initializeApp({
+            credential: admin.credential.cert(serviceAccount),
+        });
+    }
+
+    console.log('[Firebase] Admin SDK Initialized');
+}
 const sendPushNotification = async (token, title, body, data = {}) => {
     if (!admin.apps.length) return;
 
