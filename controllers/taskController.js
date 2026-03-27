@@ -83,6 +83,25 @@ exports.getTasks = async (req, res) => {
     }
 };
 
+// @desc    Get Single Task by ID
+// @route   GET /api/tasks/:id
+// @access  Private
+exports.getTaskById = async (req, res) => {
+    try {
+        const task = await Task.findById(req.params.id)
+            .populate('project', 'name location startDate deadline category')
+            .populate('product', 'name images')
+            .populate('assignedTo', 'name role email')
+            .populate('completedBy', 'name role email');
+
+        if (!task) return res.status(404).json({ message: 'Task not found' });
+
+        res.json(task);
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+};
+
 // @desc    Assign Task to Employee
 // @route   PUT /api/tasks/:id/assign
 // @access  Private (Leader/Admin)

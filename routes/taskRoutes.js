@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { getTasks, assignTask, uploadPhoto, submitTask, startTask } = require('../controllers/taskController');
+const { getTasks, getTaskById, assignTask, uploadPhoto, submitTask, startTask } = require('../controllers/taskController');
 const { protect, authorize } = require('../middleware/authMiddleware');
 
 router.route('/')
@@ -25,8 +25,8 @@ router.route('/:id/upload')
 router.route('/:id/submit')
     .post(protect, submitTask);
 
-// General Update (Status change by Admin/Verifier)
 router.route('/:id')
-    .put(protect, authorize('admin', 'verify_team', 'team_leader'), require('../controllers/taskController').updateTask);
+    .get(protect, getTaskById)
+    .put(protect, authorize('admin', 'verify_team', 'team_leader'), (req, res) => require('../controllers/taskController').updateTask(req, res));
 
 module.exports = router;

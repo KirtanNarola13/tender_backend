@@ -22,10 +22,10 @@ const sendPushNotification = async (token, title, body, data = {}) => {
             title,
             body,
         },
-        data: {
-            ...data,
-            click_action: 'FLUTTER_NOTIFICATION_CLICK',
-        },
+        data: Object.keys(data).reduce((acc, key) => {
+            acc[key] = String(data[key]);
+            return acc;
+        }, {}),
         apns: {
             payload: {
                 aps: {
