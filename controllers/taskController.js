@@ -70,7 +70,7 @@ exports.getTasks = async (req, res) => {
 
         console.log(`[DEBUG] finalFilter:`, JSON.stringify(finalFilter));
         const tasks = await Task.find(finalFilter)
-            .populate('project', 'name location startDate deadline')
+            .populate('project', 'name location startDate deadline category')
             .populate('product', 'name images')
             .populate('assignedTo', 'name role email')
             .populate('completedBy', 'name role email')
