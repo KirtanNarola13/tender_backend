@@ -1,8 +1,5 @@
 const { Project } = require('../models/Project');
-
-// @desc    Create a new project
-// @route   POST /api/projects
-// @access  Private/Admin
+const User = require('../models/User');
 
 const { Product } = require('../models/Inventory');
 const Task = require('../models/Task');
@@ -14,7 +11,7 @@ const { createNotification } = require('./notificationController');
 // @access  Private/Admin
 exports.createProject = async (req, res) => {
     try {
-        const { name, client, location, description, assignedLeader, products, startDate, deadline, category } = req.body;
+        const { name, client, location, description, assignedLeader, products, startDate, deadline, category, branch } = req.body;
         console.log(req.body);
         // 1. Create Project
         const project = await Project.create({
@@ -28,6 +25,7 @@ exports.createProject = async (req, res) => {
             startDate,
             deadline,
             createdBy: req.user._id,
+            branch: branch || '',
             status: 'planning'
         });
 
@@ -53,7 +51,7 @@ exports.createProject = async (req, res) => {
         } else {
             console.log(`[DEBUG] No assignedLeader found in request body`);
         }
-
+        
         res.status(201).json(project);
     } catch (error) {
         console.error(error);
@@ -122,7 +120,7 @@ exports.getProjectById = async (req, res) => {
             if (project.products && project.products.length > 0) {
                 project.products.sort((a, b) => {
                     const dateA = a.lastActivity || a._id.getTimestamp() || new Date(0);
-                    const dateB = b.lastActivity || b._id.getTimestamp() || new Date(0);
+                    const dateB = b.lastActivity || a._id.getTimestamp() || new Date(0);
                     return dateB - dateA;
                 });
             }
@@ -146,7 +144,7 @@ exports.updateProject = async (req, res) => {
         const {
             name, client, location, category, description,
             startDate, deadline, status,
-            assignedLeader, products, completionLetter
+            assignedLeader, products, completionLetter, branch
         } = req.body;
 
         // Apply only provided fields (safe partial update)
@@ -159,6 +157,7 @@ exports.updateProject = async (req, res) => {
         if (deadline    !== undefined) project.deadline    = deadline  || undefined;
         if (status      !== undefined) project.status      = status;
         if (completionLetter !== undefined) project.completionLetter = completionLetter;
+        if (branch      !== undefined) project.branch      = branch;
 
         // Leader change — also reassign pending/in-progress tasks
         if (assignedLeader !== undefined) {
@@ -223,6 +222,7 @@ exports.updateProject = async (req, res) => {
         }
 
         await project.save();
+
         res.json(project);
     } catch (error) {
         console.error('updateProject error:', error.message);

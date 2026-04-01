@@ -41,6 +41,8 @@ app.use('/api/schools', require('./routes/schoolRoutes'));
 const inventoryRoutes = require('./routes/inventoryRoutes');
 console.log('Server: Loading Inventory Routes...');
 app.use('/api/inventory', inventoryRoutes);
+app.use('/api/purchase-orders', require('./routes/poRoutes'));
+app.use('/api/branches', require('./routes/branchRoutes'));
 
 app.use('/api/tasks', require('./routes/taskRoutes'));
 app.use('/api/upload', require('./routes/uploadRoutes'));

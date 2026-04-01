@@ -8,24 +8,35 @@ const User = require('../models/User');
 // @access  Private/Admin
 exports.getDashboardStats = async (req, res) => {
     try {
-        const totalProjects = await Project.countDocuments();
+        const { branch } = req.query;
+        let projectQuery = {};
+        let userQuery = {};
+        let taskQuery = {};
 
-        const tasks = await Task.find().select('status');
-        const totalTasks = tasks.length;
-        const pendingTasks = tasks.filter(t => t.status === 'pending' || t.status === 'in-progress').length;
-        const completedTasks = tasks.filter(t => t.status === 'completed' || t.status === 'verified').length;
+        if (branch && branch !== 'all') {
+            projectQuery.branch = branch;
+            userQuery.branches = branch;
+            
+            // For tasks, we filter by their project's branch
+            const projectsInBranch = await Project.find({ branch }).select('_id');
+            const projectIds = projectsInBranch.map(p => p._id);
+            taskQuery.project = { $in: projectIds };
+        }
 
-        // Count employees (users with role 'employee')
-        const totalEmployees = await User.countDocuments({ role: 'employee' });
+        const totalProjects = await Project.countDocuments(projectQuery);
 
-        // Count team leaders
-        const totalTeamLeaders = await User.countDocuments({ role: 'team_leader' });
+        const tasksCountAll = await Task.countDocuments(taskQuery);
+        const pendingTasks = await Task.countDocuments({ ...taskQuery, status: { $in: ['pending', 'in-progress'] } });
+        const completedTasks = await Task.countDocuments({ ...taskQuery, status: { $in: ['completed', 'verified'] } });
+
+        const totalEmployees = await User.countDocuments({ ...userQuery, role: 'employee' });
+        const totalTeamLeaders = await User.countDocuments({ ...userQuery, role: 'team_leader' });
 
         // Inventory Stats (Top 10 products by stock for graph)
         const inventoryStats = await Product.find().select('name totalStock').limit(10).sort({ totalStock: -1 });
 
         // Project Progress Stats
-        const projects = await Project.find().select('name');
+        const projects = await Project.find(projectQuery).select('name');
         const projectStats = await Promise.all(projects.map(async (project) => {
             const projectTasks = await Task.find({ project: project._id }).select('status');
             const total = projectTasks.length;
@@ -42,15 +53,49 @@ exports.getDashboardStats = async (req, res) => {
         // Sort by Progress (Descending)
         projectStats.sort((a, b) => b.progress - a.progress);
 
+        // Branch-wise Summary (Comparative View for Admin)
+        const allProjects = await Project.find({}).select('branch products name');
+        const allUsers = await User.find({ role: 'team_leader' }).select('branches');
+        
+        const branchNames = [...new Set([
+            ...allProjects.map(p => p.branch).filter(Boolean),
+            ...allUsers.flatMap(u => u.branches || [])
+        ])].sort();
+
+        const branchSummary = await Promise.all(branchNames.map(async (b) => {
+            const bProjects = allProjects.filter(p => p.branch === b);
+            const bLeaders = allUsers.filter(u => u.branches && u.branches.includes(b)).length;
+            
+            // Calculate avg progress for this branch
+            let totalProg = 0;
+            if (bProjects.length > 0) {
+                const progs = await Promise.all(bProjects.map(async (p) => {
+                    const tasks = await Task.find({ project: p._id }).select('status');
+                    if (tasks.length === 0) return 0;
+                    const comp = tasks.filter(t => t.status === 'completed' || t.status === 'verified').length;
+                    return Math.round((comp / tasks.length) * 100);
+                }));
+                totalProg = Math.round(progs.reduce((acc, v) => acc + v, 0) / progs.length);
+            }
+
+            return {
+                name: b,
+                projectCount: bProjects.length,
+                leaderCount: bLeaders,
+                avgProgress: totalProg
+            };
+        }));
+
         res.json({
             totalProjects,
-            totalTasks,
+            totalTasks: tasksCountAll,
             pendingTasks,
             completedTasks,
             totalEmployees,
             totalTeamLeaders,
             inventoryStats,
-            projectStats
+            projectStats,
+            branchSummary
         });
     } catch (error) {
         res.status(500).json({ message: error.message });

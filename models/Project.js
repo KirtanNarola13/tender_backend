@@ -38,6 +38,10 @@ const projectSchema = new mongoose.Schema({
     },
 
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    branch: { 
+        type: String, 
+        default: '' // Optional branch assignment
+    },
 }, { timestamps: true });
 
 // We might not need 'School' anymore if Project = Site. 

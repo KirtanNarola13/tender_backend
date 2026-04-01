@@ -4,7 +4,7 @@ const User = require('../models/User');
 // @route   POST /api/users
 // @access  Private/Admin
 exports.createUser = async (req, res) => {
-    const { name, email, password, role, assignedManager } = req.body;
+    const { name, email, password, role, assignedManager, branches } = req.body;
 
     try {
         const userExists = await User.findOne({ email });
@@ -18,6 +18,7 @@ exports.createUser = async (req, res) => {
             password,
             role,
             assignedManager: role === 'employee' ? assignedManager : undefined,
+            branches: branches || [],
         });
 
         if (user) {
@@ -27,6 +28,7 @@ exports.createUser = async (req, res) => {
                 email: user.email,
                 role: user.role,
                 assignedManager: user.assignedManager,
+                branches: user.branches,
             });
         } else {
             res.status(400).json({ message: 'Invalid user data' });
@@ -139,6 +141,10 @@ exports.updateUser = async (req, res) => {
                 user.assignedManager = req.body.role === 'employee' ? req.body.assignedManager : undefined;
             }
 
+            if (req.body.branches !== undefined) {
+                user.branches = req.body.branches;
+            }
+
             if (req.body.password) {
                 user.password = req.body.password;
             }
@@ -151,11 +157,13 @@ exports.updateUser = async (req, res) => {
                 email: updatedUser.email,
                 role: updatedUser.role,
                 assignedManager: updatedUser.assignedManager,
+                branches: updatedUser.branches,
             });
         } else {
             res.status(404).json({ message: 'User not found' });
         }
     } catch (error) {
+        console.log(error, "error")
         res.status(500).json({ message: error.message });
     }
 };

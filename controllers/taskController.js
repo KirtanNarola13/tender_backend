@@ -70,7 +70,7 @@ exports.getTasks = async (req, res) => {
 
         console.log(`[DEBUG] finalFilter:`, JSON.stringify(finalFilter));
         const tasks = await Task.find(finalFilter)
-            .populate('project', 'name location startDate deadline category')
+            .populate('project', 'name location startDate deadline category branch')
             .populate('product', 'name images')
             .populate('assignedTo', 'name role email')
             .populate('completedBy', 'name role email')
@@ -89,7 +89,7 @@ exports.getTasks = async (req, res) => {
 exports.getTaskById = async (req, res) => {
     try {
         const task = await Task.findById(req.params.id)
-            .populate('project', 'name location startDate deadline category')
+            .populate('project', 'name location startDate deadline category branch')
             .populate('product', 'name images')
             .populate('assignedTo', 'name role email')
             .populate('completedBy', 'name role email');
@@ -162,7 +162,7 @@ exports.assignBulk = async (req, res) => {
             }
         );
 
-        if (result.modifiedCount > 0) {
+        if (result.modifiedCount > 0 && employeeId) {
             await createNotification({
                 recipient: employeeId,
                 title: 'New Tasks Assigned',

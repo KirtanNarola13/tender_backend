@@ -3,6 +3,7 @@ const mongoose = require('mongoose');
 const warehouseSchema = new mongoose.Schema({
     name: { type: String, required: true },
     location: String,
+    branch: String, // Regional Branch Association
     manager: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
 }, { timestamps: true });
 

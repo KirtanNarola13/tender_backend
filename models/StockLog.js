@@ -12,6 +12,7 @@ const stockLogSchema = new mongoose.Schema({
     previousStock: { type: Number },
     newStock: { type: Number },
     reason: { type: String }, // e.g., "Procurement", "Damaged", "Sent to Site A"
+    purchaseOrder: { type: mongoose.Schema.Types.ObjectId, ref: 'PurchaseOrder' },
     referenceProject: { type: mongoose.Schema.Types.ObjectId, ref: 'Project' }, // If sent to a site
     performedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' }
 }, { timestamps: true });
