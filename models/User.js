@@ -33,6 +33,10 @@ const userSchema = new mongoose.Schema({
         type: [String],
         default: [], // Multiple branch assignments
     },
+    isBlocked: { 
+        type: Boolean, 
+        default: false 
+    },
     createdAt: {
         type: Date,
         default: Date.now,

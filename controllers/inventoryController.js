@@ -6,9 +6,33 @@ const StockLog = require('../models/StockLog');
 // @access  Private/Admin
 exports.createProduct = async (req, res) => {
     try {
-        const { ...productData } = req.body;
+        const { initialStock, ...productData } = req.body;
         let product = new Product(productData);
+
+        // Handle initial stock if provided
+        if (initialStock && initialStock.warehouseId && initialStock.quantity > 0) {
+            product.stock = [{
+                warehouse: initialStock.warehouseId,
+                quantity: Number(initialStock.quantity)
+            }];
+            product.totalStock = Number(initialStock.quantity);
+        }
+
         await product.save();
+
+        // Create Stock Log if initial stock was added
+        if (initialStock && initialStock.warehouseId && initialStock.quantity > 0) {
+            await StockLog.create({
+                product: product._id,
+                warehouse: initialStock.warehouseId,
+                action: 'IN',
+                quantity: Number(initialStock.quantity),
+                previousStock: 0,
+                newStock: Number(initialStock.quantity),
+                reason: 'Initial Stock Adjustment',
+                performedBy: req.user._id
+            });
+        }
 
         res.status(201).json(product);
     } catch (error) {
@@ -21,7 +45,7 @@ exports.createProduct = async (req, res) => {
 // @access  Private/Admin
 exports.updateProduct = async (req, res) => {
     try {
-        const { name, sku, category, description, images, steps } = req.body;
+        const { name, sku, category, description, images, steps, stockUpdate } = req.body;
         const product = await Product.findById(req.params.id);
         if (!product) return res.status(404).json({ message: 'Product not found' });
 
@@ -31,6 +55,36 @@ exports.updateProduct = async (req, res) => {
         if (description !== undefined) product.description = description;
         if (images !== undefined) product.images = images;
         if (steps !== undefined) product.steps = steps;
+
+        // Handle direct stock update if passed
+        if (stockUpdate && stockUpdate.warehouseId && stockUpdate.quantity !== undefined) {
+            const qtyToAdd = Number(stockUpdate.quantity);
+            const wId = stockUpdate.warehouseId;
+
+            const stockIndex = product.stock.findIndex(s => (s.warehouse?._id || s.warehouse).toString() === wId.toString());
+            let previousStock = 0;
+
+            if (stockIndex > -1) {
+                previousStock = product.stock[stockIndex].quantity;
+                product.stock[stockIndex].quantity += qtyToAdd;
+            } else {
+                product.stock.push({ warehouse: wId, quantity: qtyToAdd });
+            }
+
+            product.totalStock = product.stock.reduce((acc, s) => acc + s.quantity, 0);
+
+            // Create Log
+            await StockLog.create({
+                product: product._id,
+                warehouse: wId,
+                action: qtyToAdd >= 0 ? 'ADJUSTMENT' : 'ADJUSTMENT',
+                quantity: qtyToAdd,
+                previousStock,
+                newStock: previousStock + qtyToAdd,
+                reason: stockUpdate.reason || 'Manual Adjustment',
+                performedBy: req.user._id
+            });
+        }
 
         await product.save();
         res.json(product);
@@ -73,7 +127,7 @@ exports.getProducts = async (req, res) => {
             query['stock.warehouse'] = { $in: warehouseIds };
         }
 
-        const products = await Product.find(query).populate('stock.warehouse', 'name branch');
+        const products = await Product.find(query).populate('stock.warehouse', 'name branch location');
         res.json(products);
     } catch (error) {
         res.status(500).json({ message: error.message });
@@ -108,22 +162,56 @@ exports.getWarehouses = async (req, res) => {
         res.status(500).json({ message: error.message });
     }
 };
-// @desc    Add stock to a warehouse
+// @desc    Add stock to a warehouse (Manual adjustment)
 // @route   POST /api/inventory/stock/add
 // @access  Private/Admin
-/*
 exports.addStock = async (req, res) => {
-    // Disabled: Stock must be added via Purchase Orders only
-    res.status(403).json({ message: 'Stock addition is only allowed via Purchase Orders' });
+    try {
+        const { productId, warehouseId, quantity, reason, projectId, workOrderId } = req.body;
+
+        const product = await Product.findById(productId);
+        if (!product) return res.status(404).json({ message: 'Product not found' });
+
+        const qtyToAdd = Number(quantity);
+        const stockIndex = product.stock.findIndex(s => (s.warehouse?._id || s.warehouse).toString() === warehouseId.toString());
+
+        let previousStock = 0;
+        if (stockIndex > -1) {
+            previousStock = product.stock[stockIndex].quantity;
+            product.stock[stockIndex].quantity += qtyToAdd;
+        } else {
+            product.stock.push({ warehouse: warehouseId, quantity: qtyToAdd });
+        }
+
+        product.totalStock = product.stock.reduce((acc, s) => acc + s.quantity, 0);
+        await product.save();
+
+        // Create log entry
+        await StockLog.create({
+            product: productId,
+            warehouse: warehouseId,
+            action: 'ADJUSTMENT', // Can be 'ADJUSTMENT' for manual adds
+            quantity: qtyToAdd,
+            previousStock,
+            newStock: previousStock + qtyToAdd,
+            reason: reason || 'Manual Stock Addition',
+            referenceProject: projectId || undefined,
+            referenceWorkOrder: workOrderId || undefined,
+            performedBy: req.user._id
+        });
+
+        res.json(product);
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
 };
-*/
 
 // @desc    Transfer stock between warehouses
 // @route   POST /api/inventory/stock/transfer
 // @access  Private/Admin
 exports.transferStock = async (req, res) => {
     try {
-        const { productId, fromWarehouseId, toWarehouseId, quantity, reason } = req.body;
+        const { productId, fromWarehouseId, toWarehouseId, quantity, reason, projectId, workOrderId } = req.body;
 
         const product = await Product.findById(productId);
         if (!product) return res.status(404).json({ message: 'Product not found' });
@@ -159,6 +247,8 @@ exports.transferStock = async (req, res) => {
             previousStock: prevSource,
             newStock: prevSource - Number(quantity),
             reason: `Transfer to ${toWarehouseId} - ${reason || ''}`,
+            referenceProject: projectId || undefined,
+            referenceWorkOrder: workOrderId || undefined,
             performedBy: req.user._id
         });
 
@@ -171,6 +261,8 @@ exports.transferStock = async (req, res) => {
             previousStock: prevDest,
             newStock: prevDest + Number(quantity),
             reason: `Transfer from ${fromWarehouseId} - ${reason || ''}`,
+            referenceProject: projectId || undefined,
+            referenceWorkOrder: workOrderId || undefined,
             performedBy: req.user._id
         });
 
@@ -185,10 +277,17 @@ exports.transferStock = async (req, res) => {
 // @access  Private/Admin
 exports.getStockLogs = async (req, res) => {
     try {
-        const logs = await StockLog.find({})
+        const { product } = req.query;
+        let query = {};
+        if (product) {
+            query.product = product;
+        }
+
+        const logs = await StockLog.find(query)
             .populate('product', 'name sku')
             .populate('warehouse', 'name')
             .populate('performedBy', 'name')
+            .populate('referenceWorkOrder', 'workOrderNumber')
             .sort({ createdAt: -1 })
             .limit(100);
         res.json(logs);

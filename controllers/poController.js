@@ -7,29 +7,42 @@ const StockLog = require('../models/StockLog');
 // @access  Private/Admin
 exports.createPurchaseOrder = async (req, res) => {
     try {
-        const { party, warehouse, items, date } = req.body;
+        const { party, warehouse, items, date, poNumber: manualPoNumber, project } = req.body;
 
         if (!items || items.length === 0) {
             return res.status(400).json({ message: 'At least one item is required' });
         }
 
-        // Generate PO Number: PO-YYYYMMDD-XXX
-        const today = new Date();
-        const dateStr = today.toISOString().slice(0, 10).replace(/-/g, '');
-        const startOfDay = new Date(today.setHours(0, 0, 0, 0));
-        const endOfDay = new Date(today.setHours(23, 59, 59, 999));
+        let poNumber = manualPoNumber;
 
+        // If no PO number provided, generate one
+        if (!poNumber) {
+            // Generate PO Number: PO-YYYYMMDD-XXX
+        const now = new Date();
+        const dateStr = now.toISOString().slice(0, 10).replace(/-/g, '');
+        
+        // Find last PO for THIS EXACT DATE string to ensure correct sequence
         const lastPO = await PurchaseOrder.findOne({
-            createdAt: { $gte: startOfDay, $lte: endOfDay }
-        }).sort({ createdAt: -1 });
+            poNumber: new RegExp(`^PO-${dateStr}-`)
+        }).sort({ poNumber: -1 });
 
         let sequence = '001';
         if (lastPO && lastPO.poNumber) {
-            const lastSeq = parseInt(lastPO.poNumber.split('-')[2]);
-            sequence = String(lastSeq + 1).padStart(3, '0');
+            const parts = lastPO.poNumber.split('-');
+            const lastSeq = parseInt(parts[parts.length - 1]);
+            if (!isNaN(lastSeq)) {
+                sequence = String(lastSeq + 1).padStart(3, '0');
+            }
         }
 
-        const poNumber = `PO-${dateStr}-${sequence}`;
+        poNumber = `PO-${dateStr}-${sequence}`;
+        }
+
+        // Final duplicate check if manually provided
+        if (manualPoNumber) {
+            const existing = await PurchaseOrder.findOne({ poNumber });
+            if (existing) return res.status(400).json({ message: `PO Number ${poNumber} already exists` });
+        }
 
         // Calculate Totals server-side
         let totalQuantity = 0;
@@ -59,6 +72,7 @@ exports.createPurchaseOrder = async (req, res) => {
                 totalQuantity,
                 totalAmount
             },
+            project: project || undefined,
             createdBy: req.user._id,
             deliveryStatus: 'PENDING',
             isStockAdded: false
@@ -79,28 +93,55 @@ exports.createPurchaseOrder = async (req, res) => {
 exports.updatePOStatus = async (req, res) => {
     try {
         const { id } = req.params;
-        const { deliveryStatus } = req.body;
+        const { deliveryStatus, deliveredItems } = req.body; // deliveredItems: [{ productId, quantity }]
 
         const po = await PurchaseOrder.findById(id);
         if (!po) return res.status(404).json({ message: 'Purchase Order not found' });
 
-        // Enforce state transitions
-        if (po.deliveryStatus === 'DELIVERED') {
-            return res.status(400).json({ message: 'Cannot change status of a DELIVERED order' });
+        // Simple status change (e.g. IN_TRANSIT)
+        if (deliveryStatus && !deliveredItems) {
+            po.deliveryStatus = deliveryStatus;
+            await po.save();
+            return res.json(po);
         }
 
-        if (po.deliveryStatus === 'PENDING' && deliveryStatus === 'DELIVERED') {
-            // Optional: allow direct jump? Or force IN_TRANSIT? User said PENDING -> IN_TRANSIT -> DELIVERED.
-            // But sometimes people want to skip. Let's stick to user suggested transitions for UX but allow flexibility here if needed.
-            // Actually, user said: PENDING -> IN_TRANSIT ✅, IN_TRANSIT -> DELIVERED ✅. 
-            // I will allow them for now but maybe warn. Actually, let's just allow it for backend flexibility but restrict in UI.
-        }
+        // Processing a Delivery (Partial or Full)
+        if (deliveredItems && deliveredItems.length > 0) {
+            let workOrderId;
+            if (po.project) {
+                const ProjectModel = require('../models/Project').Project;
+                const proj = await ProjectModel.findById(po.project).populate('workOrder');
+                workOrderId = proj?.workOrder?._id || proj?.workOrder;
+            }
 
-        // Logic for Stock Addition
-        if (deliveryStatus === 'DELIVERED' && !po.isStockAdded) {
-            // Process Each Item
-            for (const item of po.items) {
-                const product = await Product.findById(item.product);
+            const currentDelivery = {
+                items: [],
+                deliveredAt: new Date(),
+                performedBy: req.user._id
+            };
+
+            for (const dItem of deliveredItems) {
+                const poItem = po.items.find(i => i.product.toString() === dItem.productId.toString());
+                if (!poItem) continue;
+
+                const qtyDelivered = Number(dItem.quantity);
+                if (qtyDelivered <= 0) continue;
+
+                // Validation: Cannot exceed total pieces
+                const currentReceived = poItem.receivedQuantity || 0;
+                if (currentReceived + qtyDelivered > poItem.quantity) {
+                    return res.status(400).json({ message: `Delivery for ${poItem.productName} exceeds remaining quantity` });
+                }
+
+                // Update received quantity
+                poItem.receivedQuantity = currentReceived + qtyDelivered;
+                currentDelivery.items.push({ 
+                    product: poItem.product, 
+                    quantity: qtyDelivered 
+                });
+
+                // Update Product Stock
+                const product = await Product.findById(poItem.product);
                 if (!product) continue;
 
                 const stockIndex = product.stock.findIndex(s => s.warehouse.toString() === po.warehouse.toString());
@@ -108,37 +149,42 @@ exports.updatePOStatus = async (req, res) => {
 
                 if (stockIndex > -1) {
                     previousStock = product.stock[stockIndex].quantity;
-                    product.stock[stockIndex].quantity += Number(item.quantity);
+                    product.stock[stockIndex].quantity += qtyDelivered;
                 } else {
-                    product.stock.push({ warehouse: po.warehouse, quantity: Number(item.quantity) });
+                    product.stock.push({ warehouse: po.warehouse, quantity: qtyDelivered });
                 }
 
-                // Update Total Stock
                 product.totalStock = product.stock.reduce((acc, curr) => acc + curr.quantity, 0);
                 await product.save();
 
                 // Create Stock Log
                 await StockLog.create({
-                    product: item.product,
+                    product: poItem.product,
                     warehouse: po.warehouse,
                     action: 'IN',
-                    quantity: Number(item.quantity),
+                    quantity: qtyDelivered,
                     previousStock,
-                    newStock: previousStock + Number(item.quantity),
-                    reason: `PO Received: ${po.poNumber}`,
+                    newStock: previousStock + qtyDelivered,
+                    reason: `PO Partial Delivery: ${po.poNumber}`,
                     purchaseOrder: po._id,
+                    referenceProject: po.project || undefined,
+                    referenceWorkOrder: workOrderId || undefined,
                     performedBy: req.user._id
                 });
             }
 
-            po.isStockAdded = true;
+            po.partialDeliveries.push(currentDelivery);
+
+            // Determine if fully delivered
+            const totalToOrder = po.items.reduce((acc, i) => acc + i.quantity, 0);
+            const totalReceived = po.items.reduce((acc, i) => acc + (i.receivedQuantity || 0), 0);
+
+            po.deliveryStatus = totalReceived >= totalToOrder ? 'DELIVERED' : 'PARTIAL';
+            await po.save();
+            return res.json(po);
         }
 
-        po.deliveryStatus = deliveryStatus;
-        await po.save();
-
-        res.json(po);
-
+        res.status(400).json({ message: 'Invalid update request' });
     } catch (error) {
         console.error('Error updating PO status:', error);
         res.status(500).json({ message: error.message });
@@ -153,6 +199,7 @@ exports.getPOs = async (req, res) => {
         const pos = await PurchaseOrder.find({})
             .populate('warehouse', 'name')
             .populate('createdBy', 'name')
+            .populate('partialDeliveries.performedBy', 'name') // For history view
             .sort({ createdAt: -1 });
         res.json(pos);
     } catch (error) {
@@ -168,7 +215,8 @@ exports.getPOById = async (req, res) => {
         const po = await PurchaseOrder.findById(req.params.id)
             .populate('warehouse', 'name location')
             .populate('items.product', 'name sku category')
-            .populate('createdBy', 'name');
+            .populate('createdBy', 'name')
+            .populate('partialDeliveries.performedBy', 'name');
         
         if (!po) return res.status(404).json({ message: 'Purchase Order not found' });
         res.json(po);

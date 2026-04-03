@@ -42,6 +42,8 @@ const projectSchema = new mongoose.Schema({
         type: String, 
         default: '' // Optional branch assignment
     },
+    workOrder: { type: mongoose.Schema.Types.ObjectId, ref: 'WorkOrder' },
+    workOrderCategory: { type: String },
 }, { timestamps: true });
 
 // We might not need 'School' anymore if Project = Site. 

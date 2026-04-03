@@ -14,6 +14,7 @@ const stockLogSchema = new mongoose.Schema({
     reason: { type: String }, // e.g., "Procurement", "Damaged", "Sent to Site A"
     purchaseOrder: { type: mongoose.Schema.Types.ObjectId, ref: 'PurchaseOrder' },
     referenceProject: { type: mongoose.Schema.Types.ObjectId, ref: 'Project' }, // If sent to a site
+    referenceWorkOrder: { type: mongoose.Schema.Types.ObjectId, ref: 'WorkOrder' }, // If linked to a larger work order
     performedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' }
 }, { timestamps: true });
 

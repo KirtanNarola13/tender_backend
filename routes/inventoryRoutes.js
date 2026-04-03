@@ -19,7 +19,7 @@ const {
 const { protect, authorize } = require('../middleware/authMiddleware');
 
 // Stock Operations - Must be before generic routes
-// router.post('/stock/add', protect, authorize('admin'), addStock);
+router.post('/stock/add', protect, authorize('admin'), addStock);
 router.post('/stock/transfer', protect, authorize('admin'), transferStock);
 router.get('/logs', protect, authorize('admin', 'admin_viewer'), getStockLogs);
 

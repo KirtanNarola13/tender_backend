@@ -36,6 +36,10 @@ const purchaseOrderSchema = new mongoose.Schema({
             type: Number, 
             required: true 
         },
+        receivedQuantity: {
+            type: Number,
+            default: 0
+        },
         unitPrice: { 
             type: Number, 
             default: 0 
@@ -51,17 +55,25 @@ const purchaseOrderSchema = new mongoose.Schema({
     },
     deliveryStatus: {
         type: String,
-        enum: ['PENDING', 'IN_TRANSIT', 'DELIVERED'],
+        enum: ['PENDING', 'IN_TRANSIT', 'PARTIAL', 'DELIVERED'],
         default: 'PENDING'
     },
-    isStockAdded: {
-        type: Boolean,
-        default: false
-    },
+    partialDeliveries: [{
+        items: [{
+            product: { type: mongoose.Schema.Types.ObjectId, ref: 'Product' },
+            quantity: Number
+        }],
+        deliveredAt: { type: Date, default: Date.now },
+        performedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' }
+    }],
     createdBy: { 
         type: mongoose.Schema.Types.ObjectId, 
         ref: 'User', 
         required: true 
+    },
+    project: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Project'
     }
 }, { timestamps: true });
 

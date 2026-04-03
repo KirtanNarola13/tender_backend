@@ -1,5 +1,6 @@
 const { Project } = require('../models/Project');
 const User = require('../models/User');
+const WorkOrder = require('../models/WorkOrder');
 
 const { Product } = require('../models/Inventory');
 const Task = require('../models/Task');
@@ -11,7 +12,14 @@ const { createNotification } = require('./notificationController');
 // @access  Private/Admin
 exports.createProject = async (req, res) => {
     try {
-        const { name, client, location, description, assignedLeader, products, startDate, deadline, category, branch } = req.body;
+        const { name, client, location, description, assignedLeader, products, startDate, deadline, category, branch, workOrder, workOrderCategory } = req.body;
+        
+        // 0. Check for duplicate name
+        const existingProject = await Project.findOne({ name: { $regex: new RegExp(`^${name.trim()}$`, 'i') } });
+        if (existingProject) {
+            return res.status(400).json({ message: `Project with name "${name}" already exists.` });
+        }
+
         console.log(req.body);
         // 1. Create Project
         const project = await Project.create({
@@ -26,8 +34,22 @@ exports.createProject = async (req, res) => {
             deadline,
             createdBy: req.user._id,
             branch: branch || '',
-            status: 'planning'
+            status: 'planning',
+            workOrder,
+            workOrderCategory
         });
+
+        // 1.5 Update WorkOrder if provided
+        if (workOrder && workOrderCategory) {
+            const wo = await WorkOrder.findById(workOrder);
+            if (wo) {
+                const categoryIdx = wo.categories.findIndex(c => c.name === workOrderCategory);
+                if (categoryIdx > -1) {
+                    wo.categories[categoryIdx].projects.push(project._id);
+                    await wo.save();
+                }
+            }
+        }
 
         // 2. Auto-generate Tasks for each Product
         if (products && products.length > 0) {
@@ -67,6 +89,7 @@ exports.getProjects = async (req, res) => {
         const projects = await Project.find({})
             .populate('createdBy', 'name')
             .populate('assignedLeader', 'name')
+            .populate('workOrder', 'workOrderNumber')
             .sort({ updatedAt: -1 });
 
         // Enrich projects with real-time progress for each product
@@ -114,7 +137,8 @@ exports.getProjectById = async (req, res) => {
     try {
         const project = await Project.findById(req.params.id)
             .populate('products.product', 'name images steps')
-            .populate('assignedLeader', 'name');
+            .populate('assignedLeader', 'name')
+            .populate('workOrder', 'workOrderNumber');
         if (project) {
             // Sort products by last activity (Latest first)
             if (project.products && project.products.length > 0) {
@@ -148,7 +172,16 @@ exports.updateProject = async (req, res) => {
         } = req.body;
 
         // Apply only provided fields (safe partial update)
-        if (name        !== undefined) project.name        = name;
+        if (name !== undefined && name.trim() !== project.name) {
+            const existingProject = await Project.findOne({ 
+                name: { $regex: new RegExp(`^${name.trim()}$`, 'i') },
+                _id: { $ne: project._id }
+            });
+            if (existingProject) {
+                return res.status(400).json({ message: `Another project with name "${name}" already exists.` });
+            }
+            project.name = name.trim();
+        }
         if (client      !== undefined) project.client      = client;
         if (location    !== undefined) project.location    = location;
         if (category    !== undefined) project.category    = category;

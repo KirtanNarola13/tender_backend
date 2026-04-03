@@ -35,16 +35,22 @@ exports.getDashboardStats = async (req, res) => {
         // Inventory Stats (Top 10 products by stock for graph)
         const inventoryStats = await Product.find().select('name totalStock').limit(10).sort({ totalStock: -1 });
 
-        // Project Progress Stats
-        const projects = await Project.find(projectQuery).select('name');
+        // Project Progress Stats — use stored products[].progress for accuracy
+        const projects = await Project.find(projectQuery).select('name products');
         const projectStats = await Promise.all(projects.map(async (project) => {
             const projectTasks = await Task.find({ project: project._id }).select('status');
             const total = projectTasks.length;
             const completed = projectTasks.filter(t => t.status === 'completed' || t.status === 'verified').length;
-            const progress = total > 0 ? Math.round((completed / total) * 100) : 0;
+
+            // Use stored granular progress from products array for accurate progress
+            const prods = project.products || [];
+            const progress = prods.length > 0
+                ? Math.round(prods.reduce((sum, p) => sum + (p.progress || 0), 0) / prods.length)
+                : (total > 0 ? Math.round((completed / total) * 100) : 0);
+
             return {
                 name: project.name,
-                progress: progress,
+                progress,
                 totalTasks: total,
                 completedTasks: completed
             };
@@ -54,6 +60,7 @@ exports.getDashboardStats = async (req, res) => {
         projectStats.sort((a, b) => b.progress - a.progress);
 
         // Branch-wise Summary (Comparative View for Admin)
+        // Fetch products so we can use stored progress values
         const allProjects = await Project.find({}).select('branch products name');
         const allUsers = await User.find({ role: 'team_leader' }).select('branches');
         
@@ -62,19 +69,20 @@ exports.getDashboardStats = async (req, res) => {
             ...allUsers.flatMap(u => u.branches || [])
         ])].sort();
 
-        const branchSummary = await Promise.all(branchNames.map(async (b) => {
+        const branchSummary = branchNames.map((b) => {
             const bProjects = allProjects.filter(p => p.branch === b);
             const bLeaders = allUsers.filter(u => u.branches && u.branches.includes(b)).length;
             
-            // Calculate avg progress for this branch
+            // Calculate avg progress using stored products[].progress per project
             let totalProg = 0;
             if (bProjects.length > 0) {
-                const progs = await Promise.all(bProjects.map(async (p) => {
-                    const tasks = await Task.find({ project: p._id }).select('status');
-                    if (tasks.length === 0) return 0;
-                    const comp = tasks.filter(t => t.status === 'completed' || t.status === 'verified').length;
-                    return Math.round((comp / tasks.length) * 100);
-                }));
+                const progs = bProjects.map((p) => {
+                    const prods = p.products || [];
+                    if (prods.length === 0) return 0;
+                    return Math.round(
+                        prods.reduce((sum, prod) => sum + (prod.progress || 0), 0) / prods.length
+                    );
+                });
                 totalProg = Math.round(progs.reduce((acc, v) => acc + v, 0) / progs.length);
             }
 
@@ -84,7 +92,7 @@ exports.getDashboardStats = async (req, res) => {
                 leaderCount: bLeaders,
                 avgProgress: totalProg
             };
-        }));
+        });
 
         res.json({
             totalProjects,

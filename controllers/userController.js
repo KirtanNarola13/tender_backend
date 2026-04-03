@@ -168,7 +168,7 @@ exports.updateUser = async (req, res) => {
     }
 };
 
-// @desc    Delete user
+// @desc    Toggle Block/Unblock user
 // @route   DELETE /api/users/:id
 // @access  Private/Admin
 exports.deleteUser = async (req, res) => {
@@ -179,43 +179,21 @@ exports.deleteUser = async (req, res) => {
             return res.status(404).json({ message: 'User not found' });
         }
 
-        // Verification Checks
-        const models = {
-            Task: require('../models/Task'),
-            Project: require('../models/Project').Project,
-            Warehouse: require('../models/Inventory').Warehouse
-        };
-
-        const userId = user._id;
-
-        const taskCount = await models.Task.countDocuments({
-            $or: [
-                { assignedTo: userId },
-                { assignedBy: userId },
-                { completedBy: userId },
-                { verifiedBy: userId }
-            ]
-        });
-
-        const projectCount = await models.Project.countDocuments({
-            $or: [
-                { assignedLeader: userId },
-                { createdBy: userId }
-            ]
-        });
-
-        const warehouseCount = await models.Warehouse.countDocuments({
-            manager: userId
-        });
-
-        if (taskCount > 0 || projectCount > 0 || warehouseCount > 0) {
-            return res.status(400).json({
-                message: `Cannot delete user. Associated with ${taskCount} tasks, ${projectCount} projects, and ${warehouseCount} warehouses.`
-            });
+        // Security Check: Team Leaders can only block their own employees
+        if (req.user.role === 'team_leader') {
+            if (user.role !== 'employee' || user.assignedManager?.toString() !== req.user._id.toString()) {
+                return res.status(403).json({ message: 'You can only manage users in your own team' });
+            }
         }
 
-        await user.deleteOne();
-        res.json({ message: 'User removed' });
+        // Toggle blocked status instead of deleting
+        user.isBlocked = !user.isBlocked;
+        await user.save();
+
+        res.json({ 
+            message: user.isBlocked ? 'User account has been blocked' : 'User account has been unblocked',
+            isBlocked: user.isBlocked 
+        });
 
     } catch (error) {
         res.status(500).json({ message: error.message });

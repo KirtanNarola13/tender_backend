@@ -5,7 +5,15 @@ const Branch = require('../models/Branch');
 // @access  Private
 exports.getBranches = async (req, res) => {
     try {
-        const branches = await Branch.find({}).populate('manager', 'name email').sort({ name: 1 });
+        const filter = {};
+        if (req.query.status) {
+            filter.status = req.query.status;
+        }
+
+        const branches = await Branch.find(filter)
+            .populate('manager', 'name email')
+            .sort({ name: 1 });
+            
         res.json(branches);
     } catch (error) {
         res.status(500).json({ message: error.message });

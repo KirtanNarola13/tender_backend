@@ -46,6 +46,10 @@ exports.login = async (req, res) => {
         const user = await User.findOne({ email }).select('+password');
 
         if (user && (await user.matchPassword(password))) {
+            if (user.isBlocked) {
+                return res.status(403).json({ message: 'Your account has been blocked. Please contact administrator.' });
+            }
+
             // Check if admin is trying to login from mobile
             const clientType = req.headers['x-client-type'];
             if (user.role === 'admin' && clientType === 'mobile') {
