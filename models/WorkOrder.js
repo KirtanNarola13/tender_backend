@@ -2,7 +2,7 @@ const mongoose = require('mongoose');
 
 const workOrderSchema = new mongoose.Schema({
     workOrderNumber: {
-        type: String,
+        type: Number,
         required: true,
         unique: true,
         trim: true

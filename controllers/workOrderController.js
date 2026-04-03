@@ -8,7 +8,12 @@ exports.createWorkOrder = async (req, res) => {
     try {
         const { workOrderNumber, description, categories } = req.body;
 
-        const existingWON = await WorkOrder.findOne({ workOrderNumber: { $regex: new RegExp(`^${workOrderNumber.trim()}$`, 'i') } });
+        const numericWON = Number(workOrderNumber);
+        if (isNaN(numericWON)) {
+            return res.status(400).json({ message: "Work Order Number must be a valid number." });
+        }
+
+        const existingWON = await WorkOrder.findOne({ workOrderNumber: numericWON });
         if (existingWON) {
             return res.status(400).json({ message: `Work Order Number "${workOrderNumber}" already exists.` });
         }
@@ -74,15 +79,20 @@ exports.updateWorkOrder = async (req, res) => {
         }
 
         // Handle WON uniqueness
-        if (workOrderNumber && workOrderNumber !== workOrder.workOrderNumber) {
+        if (workOrderNumber !== undefined && Number(workOrderNumber) !== workOrder.workOrderNumber) {
+            const numericWON = Number(workOrderNumber);
+            if (isNaN(numericWON)) {
+                return res.status(400).json({ message: "Work Order Number must be a valid number." });
+            }
+
             const existingWON = await WorkOrder.findOne({ 
-                workOrderNumber: { $regex: new RegExp(`^${workOrderNumber.trim()}$`, 'i') },
+                workOrderNumber: numericWON,
                 _id: { $ne: workOrder._id }
             });
             if (existingWON) {
                 return res.status(400).json({ message: `Work Order Number "${workOrderNumber}" already exists.` });
             }
-            workOrder.workOrderNumber = workOrderNumber;
+            workOrder.workOrderNumber = numericWON;
         }
 
         if (description !== undefined) workOrder.description = description;
