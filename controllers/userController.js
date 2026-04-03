@@ -54,7 +54,7 @@ exports.getAllUsers = async (req, res) => {
 // @access  Private (Admin & Team Leader)
 exports.getEmployees = async (req, res) => {
     try {
-        const users = await User.find({ role: 'employee' }).select('_id name email role');
+        const users = await User.find({ role: 'employee', isBlocked: { $ne: true } }).select('_id name email role');
         res.json(users);
     } catch (error) {
         res.status(500).json({ message: error.message });
@@ -95,8 +95,11 @@ exports.createUserByTeamLeader = async (req, res) => {
 // @access  Private/Team Leader
 exports.getMyEmployees = async (req, res) => {
     try {
-        const users = await User.find({ role: 'employee', assignedManager: req.user._id })
-            .select('_id name email role createdAt');
+        const users = await User.find({ 
+            role: 'employee', 
+            assignedManager: req.user._id,
+            isBlocked: { $ne: true } 
+        }).select('_id name email role createdAt');
         res.json(users);
     } catch (error) {
         res.status(500).json({ message: error.message });
