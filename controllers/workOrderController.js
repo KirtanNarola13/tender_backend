@@ -1,5 +1,6 @@
 const WorkOrder = require('../models/WorkOrder');
 const { Project } = require('../models/Project');
+const Task = require('../models/Task');
 
 // @desc    Create a new Work Order
 // @route   POST /api/workorders
@@ -96,7 +97,24 @@ exports.updateWorkOrder = async (req, res) => {
         }
 
         if (description !== undefined) workOrder.description = description;
-        if (categories !== undefined) workOrder.categories = categories;
+        if (categories !== undefined) {
+            // Check for deleted categories to cascade delete their associated projects and tasks
+            const oldCategories = workOrder.categories;
+            const newCategories = categories;
+
+            const deletedCategories = oldCategories.filter(oldCat => 
+                !newCategories.some(newCat => newCat.name === oldCat.name)
+            );
+
+            for (const delCat of deletedCategories) {
+                if (delCat.projects && delCat.projects.length > 0) {
+                    await Task.deleteMany({ project: { $in: delCat.projects } });
+                    await Project.deleteMany({ _id: { $in: delCat.projects } });
+                }
+            }
+
+            workOrder.categories = categories;
+        }
 
         const updatedWorkOrder = await workOrder.save();
         res.json(updatedWorkOrder);
@@ -113,6 +131,15 @@ exports.deleteWorkOrder = async (req, res) => {
         const workOrder = await WorkOrder.findById(req.params.id);
         if (!workOrder) {
             return res.status(404).json({ message: 'Work Order not found' });
+        }
+
+        // Cascade delete all associated projects and their tasks
+        const projectsToDelete = await Project.find({ workOrder: workOrder._id });
+        const projectIds = projectsToDelete.map(p => p._id);
+        
+        if (projectIds.length > 0) {
+            await Task.deleteMany({ project: { $in: projectIds } });
+            await Project.deleteMany({ _id: { $in: projectIds } });
         }
 
         await workOrder.deleteOne();
