@@ -95,6 +95,15 @@ exports.getProjects = async (req, res) => {
         // Enrich projects with real-time progress for each product
         const enrichedProjects = await Promise.all(projects.map(async (project) => {
             const projectObj = project.toObject();
+
+            // Calculate overall project progress
+            const totalProjectTasks = await Task.countDocuments({ project: project._id });
+            const completedProjectTasks = await Task.countDocuments({
+                project: project._id,
+                status: { $in: ['completed', 'verified', 'submitted'] }
+            });
+            projectObj.progress = project.status === 'completed' ? 100 : (totalProjectTasks > 0 ? Math.round((completedProjectTasks / totalProjectTasks) * 100) : 0);
+
             if (projectObj.products && projectObj.products.length > 0) {
                 // Calculate real-time progress for each product in the project
                 projectObj.products = await Promise.all(projectObj.products.map(async (prodEntry) => {
