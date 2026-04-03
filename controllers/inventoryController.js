@@ -1,5 +1,7 @@
 const { Product, Warehouse } = require('../models/Inventory');
 const StockLog = require('../models/StockLog');
+const Project = require('../models/Project').Project; // Accessing the Project model specifically
+const WorkOrder = require('../models/WorkOrder');
 
 // @desc    Create a new product
 // @route   POST /api/inventory/products
@@ -287,7 +289,20 @@ exports.getStockLogs = async (req, res) => {
             .populate('product', 'name sku')
             .populate('warehouse', 'name')
             .populate('performedBy', 'name')
-            .populate('referenceWorkOrder', 'workOrderNumber')
+            .populate({
+                path: 'referenceWorkOrder',
+                select: 'workOrderNumber'
+            })
+            .populate({
+                path: 'purchaseOrder',
+                populate: {
+                    path: 'project',
+                    populate: {
+                        path: 'workOrder',
+                        select: 'workOrderNumber'
+                    }
+                }
+            })
             .sort({ createdAt: -1 })
             .limit(100);
         res.json(logs);

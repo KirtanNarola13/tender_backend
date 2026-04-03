@@ -199,7 +199,11 @@ exports.getPOs = async (req, res) => {
         const pos = await PurchaseOrder.find({})
             .populate('warehouse', 'name')
             .populate('createdBy', 'name')
-            .populate('partialDeliveries.performedBy', 'name') // For history view
+            .populate('partialDeliveries.performedBy', 'name')
+            .populate({
+                path: 'project',
+                populate: { path: 'workOrder', select: 'workOrderNumber' }
+            })
             .sort({ createdAt: -1 });
         res.json(pos);
     } catch (error) {
@@ -216,7 +220,11 @@ exports.getPOById = async (req, res) => {
             .populate('warehouse', 'name location')
             .populate('items.product', 'name sku category')
             .populate('createdBy', 'name')
-            .populate('partialDeliveries.performedBy', 'name');
+            .populate('partialDeliveries.performedBy', 'name')
+            .populate({
+                path: 'project',
+                populate: { path: 'workOrder', select: 'workOrderNumber' }
+            });
         
         if (!po) return res.status(404).json({ message: 'Purchase Order not found' });
         res.json(po);
@@ -234,6 +242,10 @@ exports.getPOsByProduct = async (req, res) => {
             'items.product': req.params.productId
         })
         .populate('warehouse', 'name')
+        .populate({
+            path: 'project',
+            populate: { path: 'workOrder', select: 'workOrderNumber' }
+        })
         .sort({ createdAt: -1 });
         res.json(pos);
     } catch (error) {
