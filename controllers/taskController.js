@@ -505,6 +505,13 @@ const updateProjectProductStatus = async (projectId, productId, explicitStatus =
             status: { $in: ['completed', 'verified'] }
         });
 
+        // Count tasks that are currently being worked on
+        const activeTasks = await Task.countDocuments({
+            project: new mongoose.Types.ObjectId(projectId),
+            product: new mongoose.Types.ObjectId(productId),
+            status: { $in: ['in-progress', 'submitted'] }
+        });
+
         if (totalTasks > 0) {
             prodEntry.progress = Math.round((completedTasks / totalTasks) * 100);
             
@@ -512,9 +519,9 @@ const updateProjectProductStatus = async (projectId, productId, explicitStatus =
             if (completedTasks === totalTasks && totalTasks > 0) {
                 prodEntry.status = 'completed';
                 prodEntry.completedQuantity = prodEntry.plannedQuantity;
-            } else if (completedTasks > 0) {
-                // If work has started and at least one task is done, ensure status is in-progress
-                if (prodEntry.status === 'pending') {
+            } else if (completedTasks > 0 || activeTasks > 0 || explicitStatus === 'in-progress') {
+                // If work has started (at least one task is done, in-progress or explicitly requested), ensure status is in-progress
+                if (prodEntry.status === 'pending' || prodEntry.status === 'planning') {
                     prodEntry.status = 'in-progress';
                 }
             }
@@ -524,6 +531,8 @@ const updateProjectProductStatus = async (projectId, productId, explicitStatus =
                 prodEntry.status = 'completed';
                 prodEntry.progress = 100;
                 prodEntry.completedQuantity = prodEntry.plannedQuantity;
+            } else if (explicitStatus === 'in-progress') {
+                prodEntry.status = 'in-progress';
             }
         }
         prodEntry.lastActivity = Date.now();
