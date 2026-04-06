@@ -7,9 +7,6 @@ const workOrderSchema = new mongoose.Schema({
         unique: true,
         trim: true
     },
-    description: {
-        type: String
-    },
     categories: [{
         name: { type: String, required: true },
         projects: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Project' }]

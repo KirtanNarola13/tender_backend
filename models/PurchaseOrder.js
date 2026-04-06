@@ -55,9 +55,16 @@ const purchaseOrderSchema = new mongoose.Schema({
     },
     deliveryStatus: {
         type: String,
-        enum: ['PENDING', 'IN_TRANSIT', 'PARTIAL', 'DELIVERED'],
-        default: 'PENDING'
+        enum: ['ORDER_PLACED', 'ADVANCE', 'IN_PRODUCTION', 'TRANSIT', 'DELIVERED', 'INSTALLATION', 'COMPLETED', 'PARTIAL'],
+        default: 'ORDER_PLACED'
     },
+    statusTimeline: [{
+        status: { type: String },
+        expectedDate: { type: Date },
+        actualDate: { type: Date },
+        isCompleted: { type: Boolean, default: false },
+        notes: { type: String }
+    }],
     partialDeliveries: [{
         items: [{
             product: { type: mongoose.Schema.Types.ObjectId, ref: 'Product' },

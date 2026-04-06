@@ -1,13 +1,41 @@
 const WorkOrder = require('../models/WorkOrder');
 const { Project } = require('../models/Project');
 const Task = require('../models/Task');
+const PurchaseOrder = require('../models/PurchaseOrder');
+const Notification = require('../models/Notification');
+const { restoreStock } = require('./projectController');
+
+// Helper to cleanup projects thoroughly
+const cleanupProjects = async (projectIds, userId) => {
+    if (!projectIds || projectIds.length === 0) return;
+
+    for (const projectId of projectIds) {
+        const project = await Project.findById(projectId);
+        if (!project) continue;
+
+        // 1. Restore Stock
+        if (project.products && project.products.length > 0) {
+            for (const item of project.products) {
+                await restoreStock(item.product, item.plannedQuantity, project.name, project._id, userId);
+            }
+        }
+
+        // 2. Clear Tasks, POs, and Notifications
+        await Task.deleteMany({ project: projectId });
+        await PurchaseOrder.deleteMany({ project: projectId });
+        await Notification.deleteMany({ relatedProject: projectId });
+        
+        // 3. Delete Project itself
+        await project.deleteOne();
+    }
+};
 
 // @desc    Create a new Work Order
 // @route   POST /api/workorders
 // @access  Private/Admin
 exports.createWorkOrder = async (req, res) => {
     try {
-        const { workOrderNumber, description, categories } = req.body;
+        const { workOrderNumber, categories } = req.body;
 
         const numericWON = Number(workOrderNumber);
         if (isNaN(numericWON)) {
@@ -21,7 +49,6 @@ exports.createWorkOrder = async (req, res) => {
 
         const workOrder = await WorkOrder.create({
             workOrderNumber,
-            description,
             categories: categories || [], // { name: String, projects: [ID] }
             createdBy: req.user._id
         });
@@ -72,7 +99,7 @@ exports.getWorkOrderById = async (req, res) => {
 // @access  Private/Admin
 exports.updateWorkOrder = async (req, res) => {
     try {
-        const { workOrderNumber, description, categories } = req.body;
+        const { workOrderNumber, categories } = req.body;
         const workOrder = await WorkOrder.findById(req.params.id);
 
         if (!workOrder) {
@@ -96,7 +123,6 @@ exports.updateWorkOrder = async (req, res) => {
             workOrder.workOrderNumber = numericWON;
         }
 
-        if (description !== undefined) workOrder.description = description;
         if (categories !== undefined) {
             // Check for deleted categories to cascade delete their associated projects and tasks
             const oldCategories = workOrder.categories;
@@ -107,10 +133,7 @@ exports.updateWorkOrder = async (req, res) => {
             );
 
             for (const delCat of deletedCategories) {
-                if (delCat.projects && delCat.projects.length > 0) {
-                    await Task.deleteMany({ project: { $in: delCat.projects } });
-                    await Project.deleteMany({ _id: { $in: delCat.projects } });
-                }
+                await cleanupProjects(delCat.projects, req.user._id);
             }
 
             workOrder.categories = categories;
@@ -137,10 +160,7 @@ exports.deleteWorkOrder = async (req, res) => {
         const projectsToDelete = await Project.find({ workOrder: workOrder._id });
         const projectIds = projectsToDelete.map(p => p._id);
         
-        if (projectIds.length > 0) {
-            await Task.deleteMany({ project: { $in: projectIds } });
-            await Project.deleteMany({ _id: { $in: projectIds } });
-        }
+        await cleanupProjects(projectIds, req.user._id);
 
         await workOrder.deleteOne();
         res.json({ message: 'Work Order removed' });

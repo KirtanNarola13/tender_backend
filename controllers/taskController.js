@@ -128,7 +128,6 @@ exports.assignTask = async (req, res) => {
 
         task.assignedTo = employeeId;
         task.assignedBy = req.user._id;
-        task.status = 'pending';
 
         await task.save();
 
@@ -170,8 +169,7 @@ exports.assignBulk = async (req, res) => {
             {
                 $set: {
                     assignedTo: employeeId,
-                    assignedBy: req.user._id,
-                    status: 'pending'
+                    assignedBy: req.user._id
                 }
             }
         );

@@ -7,7 +7,7 @@ const StockLog = require('../models/StockLog');
 // @access  Private/Admin
 exports.createPurchaseOrder = async (req, res) => {
     try {
-        const { party, warehouse, items, date, poNumber: manualPoNumber, project } = req.body;
+        const { party, warehouse, items, date, poNumber: manualPoNumber, project, expectedTimeline } = req.body;
 
         if (!items || items.length === 0) {
             return res.status(400).json({ message: 'At least one item is required' });
@@ -17,25 +17,21 @@ exports.createPurchaseOrder = async (req, res) => {
 
         // If no PO number provided, generate one
         if (!poNumber) {
-            // Generate PO Number: PO-YYYYMMDD-XXX
-        const now = new Date();
-        const dateStr = now.toISOString().slice(0, 10).replace(/-/g, '');
-        
-        // Find last PO for THIS EXACT DATE string to ensure correct sequence
-        const lastPO = await PurchaseOrder.findOne({
-            poNumber: new RegExp(`^PO-${dateStr}-`)
-        }).sort({ poNumber: -1 });
+            const now = new Date();
+            const dateStr = now.toISOString().slice(0, 10).replace(/-/g, '');
+            const lastPO = await PurchaseOrder.findOne({
+                poNumber: new RegExp(`^PO-${dateStr}-`)
+            }).sort({ poNumber: -1 });
 
-        let sequence = '001';
-        if (lastPO && lastPO.poNumber) {
-            const parts = lastPO.poNumber.split('-');
-            const lastSeq = parseInt(parts[parts.length - 1]);
-            if (!isNaN(lastSeq)) {
-                sequence = String(lastSeq + 1).padStart(3, '0');
+            let sequence = '001';
+            if (lastPO && lastPO.poNumber) {
+                const parts = lastPO.poNumber.split('-');
+                const lastSeq = parseInt(parts[parts.length - 1]);
+                if (!isNaN(lastSeq)) {
+                    sequence = String(lastSeq + 1).padStart(3, '0');
+                }
             }
-        }
-
-        poNumber = `PO-${dateStr}-${sequence}`;
+            poNumber = `PO-${dateStr}-${sequence}`;
         }
 
         // Final duplicate check if manually provided
@@ -52,15 +48,20 @@ exports.createPurchaseOrder = async (req, res) => {
             const qty = Number(item.quantity) || 0;
             const price = Number(item.unitPrice) || 0;
             const itemAmount = qty * price;
-            
             totalQuantity += qty;
             totalAmount += itemAmount;
-
-            return {
-                ...item,
-                amount: itemAmount
-            };
+            return { ...item, amount: itemAmount };
         });
+
+        const statusTimeline = [
+            { status: 'ORDER_PLACED', isCompleted: true, actualDate: new Date() },
+            { status: 'ADVANCE', isCompleted: false, expectedDate: expectedTimeline?.ADVANCE },
+            { status: 'IN_PRODUCTION', isCompleted: false, expectedDate: expectedTimeline?.IN_PRODUCTION },
+            { status: 'TRANSIT', isCompleted: false, expectedDate: expectedTimeline?.TRANSIT },
+            { status: 'DELIVERED', isCompleted: false, expectedDate: expectedTimeline?.DELIVERED },
+            { status: 'INSTALLATION', isCompleted: false, expectedDate: expectedTimeline?.INSTALLATION },
+            { status: 'COMPLETED', isCompleted: false, expectedDate: expectedTimeline?.COMPLETED }
+        ];
 
         const po = new PurchaseOrder({
             poNumber,
@@ -68,13 +69,11 @@ exports.createPurchaseOrder = async (req, res) => {
             party,
             warehouse,
             items: processedItems,
-            totals: {
-                totalQuantity,
-                totalAmount
-            },
+            totals: { totalQuantity, totalAmount },
             project: project || undefined,
             createdBy: req.user._id,
-            deliveryStatus: 'PENDING',
+            deliveryStatus: 'ORDER_PLACED',
+            statusTimeline,
             isStockAdded: false
         });
 
@@ -98,14 +97,39 @@ exports.updatePOStatus = async (req, res) => {
         const po = await PurchaseOrder.findById(id);
         if (!po) return res.status(404).json({ message: 'Purchase Order not found' });
 
-        // Simple status change (e.g. IN_TRANSIT)
-        if (deliveryStatus && !deliveredItems) {
+        const { expectedDate, actualDate, notes } = req.body;
+        
+        // 1. Process Status/Timeline Updates if provided
+        if (deliveryStatus) {
             po.deliveryStatus = deliveryStatus;
-            await po.save();
-            return res.json(po);
+            let timelineItem = po.statusTimeline.find(t => t.status === deliveryStatus);
+            
+            // If timeline item doesn't exist (older orders), create it
+            if (!timelineItem) {
+                timelineItem = {
+                    status: deliveryStatus,
+                    expectedDate: expectedDate ? new Date(expectedDate) : null,
+                    actualDate: null,
+                    isCompleted: false,
+                    notes: ''
+                };
+                po.statusTimeline.push(timelineItem);
+                // Re-find it since it was pushed to the array
+                timelineItem = po.statusTimeline[po.statusTimeline.length - 1];
+            }
+
+            if (actualDate) {
+                timelineItem.actualDate = new Date(actualDate);
+                timelineItem.isCompleted = true;
+            }
+            if (expectedDate) timelineItem.expectedDate = new Date(expectedDate);
+            if (notes) timelineItem.notes = notes;
+            
+            // Ensure the parent document tracks the array modification
+            po.markModified('statusTimeline');
         }
 
-        // Processing a Delivery (Partial or Full)
+        // 2. Process Delivery Items if provided
         if (deliveredItems && deliveredItems.length > 0) {
             let workOrderId;
             if (po.project) {
@@ -175,16 +199,51 @@ exports.updatePOStatus = async (req, res) => {
 
             po.partialDeliveries.push(currentDelivery);
 
-            // Determine if fully delivered
+            // Determine if fully or partially delivered
             const totalToOrder = po.items.reduce((acc, i) => acc + i.quantity, 0);
             const totalReceived = po.items.reduce((acc, i) => acc + (i.receivedQuantity || 0), 0);
+            
+            const isFull = totalReceived >= totalToOrder;
+            po.deliveryStatus = isFull ? 'DELIVERED' : 'PARTIAL';
 
-            po.deliveryStatus = totalReceived >= totalToOrder ? 'DELIVERED' : 'PARTIAL';
+            // Mark delivered status in timeline
+            let finalDelTimeline = po.statusTimeline.find(t => t.status === 'DELIVERED');
+            if (isFull) {
+                if (!finalDelTimeline) {
+                    po.statusTimeline.push({
+                        status: 'DELIVERED',
+                        isCompleted: true,
+                        actualDate: actualDate ? new Date(actualDate) : new Date(),
+                        notes: notes || ''
+                    });
+                } else {
+                    finalDelTimeline.actualDate = actualDate ? new Date(actualDate) : new Date();
+                    finalDelTimeline.isCompleted = true;
+                    if (notes) finalDelTimeline.notes = notes;
+                }
+            } else if (deliveryStatus === 'DELIVERED') {
+                 // Even if partial, if user specifically tried to set to Delivered, we use it
+                 if (!finalDelTimeline) {
+                    po.statusTimeline.push({
+                        status: 'DELIVERED',
+                        isCompleted: false,
+                        expectedDate: expectedDate ? new Date(expectedDate) : null,
+                        notes: notes || ''
+                    });
+                } else {
+                    if (expectedDate) finalDelTimeline.expectedDate = new Date(expectedDate);
+                    if (notes) finalDelTimeline.notes = notes;
+                }
+            }
+            
+            po.markModified('statusTimeline');
             await po.save();
             return res.json(po);
         }
 
-        res.status(400).json({ message: 'Invalid update request' });
+        // 3. Fallback Save (if only status/notes updated)
+        await po.save();
+        return res.json(po);
     } catch (error) {
         console.error('Error updating PO status:', error);
         res.status(500).json({ message: error.message });
@@ -258,14 +317,14 @@ exports.getPOsByProduct = async (req, res) => {
 exports.updatePurchaseOrder = async (req, res) => {
     try {
         const { id } = req.params;
-        const { party, warehouse, items, date } = req.body;
+        const { party, warehouse, items, date, expectedTimeline } = req.body;
 
         const po = await PurchaseOrder.findById(id);
         if (!po) return res.status(404).json({ message: 'Purchase Order not found' });
 
-        // Only allow editing if Status is PENDING
-        if (po.deliveryStatus !== 'PENDING') {
-            return res.status(400).json({ message: 'Only PENDING orders can be edited' });
+        // Only allow editing if Status is ORDER_PLACED (equivalent to old PENDING)
+        if (po.deliveryStatus !== 'ORDER_PLACED') {
+            return res.status(400).json({ message: 'Only original orders can be edited' });
         }
 
         // Calculate Totals server-side
@@ -276,24 +335,24 @@ exports.updatePurchaseOrder = async (req, res) => {
             const qty = Number(item.quantity) || 0;
             const price = Number(item.unitPrice) || 0;
             const itemAmount = qty * price;
-            
             totalQuantity += qty;
             totalAmount += itemAmount;
-
-            return {
-                ...item,
-                amount: itemAmount
-            };
+            return { ...item, amount: itemAmount };
         });
 
         po.party = party || po.party;
         po.warehouse = warehouse || po.warehouse;
         po.items = processedItems;
         po.date = date || po.date;
-        po.totals = {
-            totalQuantity,
-            totalAmount
-        };
+        po.totals = { totalQuantity, totalAmount };
+
+        if (expectedTimeline) {
+            po.statusTimeline.forEach(t => {
+                if (expectedTimeline[t.status]) {
+                    t.expectedDate = new Date(expectedTimeline[t.status]);
+                }
+            });
+        }
 
         await po.save();
         res.json(po);

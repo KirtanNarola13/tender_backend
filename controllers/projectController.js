@@ -280,12 +280,28 @@ exports.deleteProject = async (req, res) => {
         const project = await Project.findById(req.params.id);
         if (!project) return res.status(404).json({ message: 'Project not found' });
 
-        // Cascade delete associated tasks
+        // 1. Restore Stock for all products in this project
+        if (project.products && project.products.length > 0) {
+            for (const item of project.products) {
+                await restoreStock(item.product, item.plannedQuantity, project.name, project._id, req.user._id);
+            }
+        }
+
+        // 2. Cascade delete associated tasks
         await Task.deleteMany({ project: project._id });
+
+        // 3. Cascade delete associated Purchase Orders
+        const PurchaseOrder = require('../models/PurchaseOrder');
+        await PurchaseOrder.deleteMany({ project: project._id });
+
+        // 4. Cascade delete associated Notifications
+        const Notification = require('../models/Notification');
+        await Notification.deleteMany({ relatedProject: project._id });
         
         await project.deleteOne();
         res.json({ message: 'Project removed' });
     } catch (error) {
+        console.error('deleteProject error:', error);
         res.status(500).json({ message: error.message });
     }
 };
@@ -328,7 +344,7 @@ async function deductStock(productId, quantity, projectName, projectId, userId) 
     }
 }
 
-async function restoreStock(productId, quantity, projectName, projectId, userId) {
+exports.restoreStock = async function(productId, quantity, projectName, projectId, userId) {
     const productDef = await Product.findById(productId);
     if (!productDef) return; // Or handle error
 
