@@ -2,6 +2,7 @@ const Task = require('../models/Task');
 const { Project } = require('../models/Project');
 const { Product } = require('../models/Inventory');
 const User = require('../models/User');
+const WorkOrder = require('../models/WorkOrder');
 
 // @desc    Get Global Dashboard Stats
 // @route   GET /api/dashboard/stats
@@ -12,18 +13,21 @@ exports.getDashboardStats = async (req, res) => {
         let projectQuery = {};
         let userQuery = {};
         let taskQuery = {};
+        let workOrderQuery = {};
 
         if (branch && branch !== 'all') {
             projectQuery.branch = branch;
             userQuery.branches = branch;
             
-            // For tasks, we filter by their project's branch
+            // For tasks and work orders, we filter by their project's branch
             const projectsInBranch = await Project.find({ branch }).select('_id');
             const projectIds = projectsInBranch.map(p => p._id);
             taskQuery.project = { $in: projectIds };
+            workOrderQuery['categories.projects'] = { $in: projectIds };
         }
 
         const totalProjects = await Project.countDocuments(projectQuery);
+        const totalWorkOrders = await WorkOrder.countDocuments(workOrderQuery);
 
         const tasksCountAll = await Task.countDocuments(taskQuery);
         const pendingTasks = await Task.countDocuments({ ...taskQuery, status: { $in: ['pending', 'in-progress'] } });
@@ -96,6 +100,7 @@ exports.getDashboardStats = async (req, res) => {
 
         res.json({
             totalProjects,
+            totalWorkOrders,
             totalTasks: tasksCountAll,
             pendingTasks,
             completedTasks,
