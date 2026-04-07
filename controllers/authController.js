@@ -45,32 +45,38 @@ exports.login = async (req, res) => {
     try {
         const user = await User.findOne({ email }).select('+password');
 
-        if (user && (await user.matchPassword(password))) {
-            if (user.isBlocked) {
-                return res.status(403).json({ message: 'Your account has been blocked. Please contact administrator.' });
-            }
-
-            // Check if admin is trying to login from mobile
-            const clientType = req.headers['x-client-type'];
-            if (user.role === 'admin' && clientType === 'mobile') {
-                console.log('Admin login blocked from mobile:', email);
-                return res.status(403).json({ 
-                    message: 'Use admin login for login admin user' 
-                });
-            }
-
-            console.log('Login success for:', email);
-            res.json({
-                _id: user._id,
-                name: user.name,
-                email: user.email,
-                role: user.role,
-                token: generateToken(user._id),
-            });
-        } else {
-            console.log('Login failed for:', email, 'User found:', !!user);
-            res.status(401).json({ message: 'Invalid email or password' });
+        if (!user) {
+            console.log('Login failed: User not found:', email);
+            return res.status(401).json({ message: 'User not found. Please check your email.' });
         }
+
+        const isMatch = await user.matchPassword(password);
+        if (!isMatch) {
+            console.log('Login failed: Incorrect password for:', email);
+            return res.status(401).json({ message: 'Incorrect password. Please try again.' });
+        }
+
+        if (user.isBlocked) {
+            return res.status(403).json({ message: 'Your account has been blocked. Please contact administrator.' });
+        }
+
+        // Check if admin is trying to login from mobile
+        const clientType = req.headers['x-client-type'];
+        if (user.role === 'admin' && clientType === 'mobile') {
+            console.log('Admin login blocked from mobile:', email);
+            return res.status(403).json({ 
+                message: 'Use admin login for login admin user' 
+            });
+        }
+
+        console.log('Login success for:', email);
+        res.json({
+            _id: user._id,
+            name: user.name,
+            email: user.email,
+            role: user.role,
+            token: generateToken(user._id),
+        });
     } catch (error) {
         res.status(500).json({ message: error.message });
     }
