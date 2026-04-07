@@ -27,7 +27,15 @@ exports.getDashboardStats = async (req, res) => {
         }
 
         const totalProjects = await Project.countDocuments(projectQuery);
-        const totalWorkOrders = await WorkOrder.countDocuments(workOrderQuery);
+        
+        // Robust Work Order Count: Count unique work orders associated with projects in this branch
+        let totalWorkOrders = 0;
+        if (branch && branch !== 'all') {
+            const uniqueWOs = await Project.distinct('workOrder', projectQuery);
+            totalWorkOrders = uniqueWOs.filter(id => id != null).length;
+        } else {
+            totalWorkOrders = await WorkOrder.countDocuments({});
+        }
 
         const tasksCountAll = await Task.countDocuments(taskQuery);
         const pendingTasks = await Task.countDocuments({ ...taskQuery, status: { $in: ['pending', 'in-progress'] } });
